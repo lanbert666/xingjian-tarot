@@ -15,31 +15,34 @@
 
 ### AI 模式
 
-在这台可以连接公司网关的电脑上，先配置 API Key 与网关地址（二选一），再启动：
+**只需要一个 API Key。** 在项目根目录新建 `.env`（已 gitignore，不会进版本库），写一行：
 
 ```bash
-# 方式一：环境变量
-$env:TAROT_API_KEY="sk-..."           # PowerShell
-$env:TAROT_GATEWAY_HOST="<网关主机>"   # 例如内网 IP 或域名
-$env:TAROT_GATEWAY_PORT="52000"
-$env:TAROT_MODEL="<模型名>"
-node server.js
-
-# 方式二：在项目根目录新建 .env 文件（已在 .gitignore 中，不会进版本库）
-# 文件内容：
-#   TAROT_API_KEY=sk-...
-#   TAROT_GATEWAY_HOST=<网关主机>
-#   TAROT_GATEWAY_PORT=52000
-#   TAROT_MODEL=<模型名>
-node server.js
+TAROT_API_KEY=sk-...
 ```
 
-网关地址与模型名属于部署方私有配置，**仓库里不保存任何默认值**（可复制 `.env.example` 为 `.env` 后填写）：三项缺任意一项时，
-`/api/chat` 返回 503、`/api/config` 报 `{"ai":false}`，页面自动回退本地解读引擎。
+然后 `npm start`，打开 [http://127.0.0.1:8901](http://127.0.0.1:8901)。
+头部显示「AI 星见在线」后，解读报告会由模型实时生成，并可在报告底部继续追问。
 
-然后访问 [http://127.0.0.1:8901](http://127.0.0.1:8901)。头部显示「AI 星见在线」后，
-报告会由 `TAROT_MODEL` 指定的模型实时生成，并可在报告底部继续追问。
-网关不可用或未配置 Key 时会自动回退到本地解读，不会打断抽牌流程。
+也可以临时用环境变量（PowerShell）：
+
+```powershell
+$env:TAROT_API_KEY="sk-..."; node server.js
+```
+
+网关地址、端口与模型名**已经内置默认值**，克隆下来不用管；只有要指向别的网关时才需要覆盖：
+
+| 变量 | 默认值 | 说明 |
+| --- | --- | --- |
+| `TAROT_API_KEY` | 无 | **必填**，缺省时 AI 关闭、页面自动回退本地解读 |
+| `TAROT_GATEWAY_HOST` | 内置 | 网关主机，一般不用改 |
+| `TAROT_GATEWAY_PORT` | 内置 | 网关端口，一般不用改 |
+| `TAROT_MODEL` | 内置 | 模型标识，一般不用改 |
+| `PORT` | `8901` | 本地监听端口 |
+| `TAROT_GATEWAY_CA` | `gateway-ca.crt` | 网关根证书路径（见下节） |
+
+没配 Key 也能用：所有牌阵、本地解读、每日一抽、档案、分享功能完全不受影响，
+只是报告由本地解读引擎生成，不会调用模型。
 
 也可以直接用 `npm start`（等价于 `node server.js`）。
 
