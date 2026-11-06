@@ -35,9 +35,9 @@ $env:TAROT_API_KEY="sk-..."; node server.js
 | 变量 | 默认值 | 说明 |
 | --- | --- | --- |
 | `TAROT_API_KEY` | 无 | **必填**，缺省时 AI 关闭、页面自动回退本地解读 |
-| `TAROT_GATEWAY_HOST` | 内置 | 网关主机，一般不用改 |
-| `TAROT_GATEWAY_PORT` | 内置 | 网关端口，一般不用改 |
-| `TAROT_MODEL` | 内置 | 模型标识，一般不用改 |
+| `TAROT_GATEWAY_HOST` | 内置 | 网关主机，一般不用改；要改时形如 `gateway.example.com` |
+| `TAROT_GATEWAY_PORT` | 内置 | 网关端口，一般不用改；要改时形如 `52000` |
+| `TAROT_MODEL` | 内置 | 模型标识，一般不用改；要改时形如 `your-model-name` |
 | `PORT` | `8901` | 本地监听端口 |
 | `TAROT_GATEWAY_CA` | `gateway-ca.crt` | 网关根证书路径（见下节） |
 
