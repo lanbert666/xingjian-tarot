@@ -57,6 +57,7 @@ TAROT_MODEL=claude-sonnet-4-5
 | `TAROT_API_BASE` | 是 | 接口地址，填到版本号为止，如 `https://api.openai.com/v1` |
 | `TAROT_MODEL` | 是 | 模型标识，如 `gpt-4o-mini`、`claude-sonnet-4-5`、`deepseek-chat` |
 | `TAROT_API_FORMAT` | 否 | `openai` / `anthropic` / `responses`，默认按地址推断 |
+| `TAROT_MAX_TOKENS_PARAM` | 否 | OpenAI 格式下输出上限的字段名，默认 `max_tokens`；o 系列 / gpt-5 等新模型填 `max_completion_tokens` |
 | `PORT` | 否 | 本地监听端口，默认 `8901` |
 | `TAROT_GATEWAY_CA` | 否 | 自签网关的根证书路径，默认 `gateway-ca.crt`（见下节） |
 | `TAROT_GATEWAY_HOST` / `TAROT_GATEWAY_PORT` | 否 | 旧写法，等价于 `TAROT_API_BASE=https://<host>:<port>/v1` + `responses` |

@@ -54,6 +54,9 @@ const MODEL = String(process.env.TAROT_MODEL || '').trim();
 const API_BASE = String(process.env.TAROT_API_BASE || '').trim();
 const API_FORMAT_ENV = String(process.env.TAROT_API_FORMAT || '').trim().toLowerCase();
 const API_FORMATS = new Set(['responses', 'openai', 'anthropic']);
+// OpenAI 新模型（o 系列、gpt-5 等）只认 max_completion_tokens，老接口和大多数代理
+// 只认 max_tokens。默认用兼容面更广的 max_tokens，需要时用环境变量改名。
+const MAX_TOKENS_PARAM = String(process.env.TAROT_MAX_TOKENS_PARAM || '').trim() || 'max_tokens';
 
 // 本地用量账本：每条上游响应追加一行 JSONL，作为到公司核对网关账单的证据。
 // 测试可用 TAROT_USAGE_LOG 指向临时文件，避免污染项目目录。
@@ -452,7 +455,7 @@ function buildUpstreamBody(format, input, maxTokens, reasoning) {
         return {
             model: MODEL,
             messages: input.map(m => ({ role: m.role, content: flattenMessage(m) })),
-            max_tokens: maxTokens
+            [MAX_TOKENS_PARAM]: maxTokens
         };
     }
     if (format === 'anthropic') {
