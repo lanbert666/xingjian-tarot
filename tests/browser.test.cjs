@@ -2399,6 +2399,57 @@ test('AI-07：长解读保存时提示已精简', { timeout: 60000 }, async t =>
     assertClean(page);
 });
 
+test('AI-01：模型不写【】标记时仍按行首标记分段', { timeout: 60000 }, async t => {
+    // 真实模型（如 Kimi）常把标记写成「牌1」或「牌1：」，不再套【】。
+    const bareText = [
+        '牌1',
+        'AI-BARE-FIRST 过去的位置解读。',
+        '牌2：',
+        'AI-BARE-SECOND 现在的位置解读。',
+        '牌3、',
+        'AI-BARE-THIRD 未来的位置解读。',
+        '串联',
+        'AI-BARE-SYNTHESIS 整体串联。',
+        '祝福',
+        'AI-BARE-BLESSING 祝福语。'
+    ].join('\n');
+    const page = await newPage(t, { ai: true, aiText: bareText });
+    await startDraw(page, { question: 'E2E AI-01 裸标记', spread: 'trinity' });
+    await autoDrawAndReveal(page, 3);
+    await page.waitFor(() => /AI/.test(document.getElementById('report-source').textContent), 15000);
+    const state = await page.eval(`({
+        first: document.getElementById('reading-past-text').textContent.trim(),
+        second: document.getElementById('reading-present-text').textContent.trim(),
+        third: document.getElementById('reading-future-text').textContent.trim(),
+        synthesis: document.getElementById('reading-synthesis-text').textContent.trim(),
+        blessing: document.getElementById('reading-blessing-text').textContent.trim(),
+        source: document.getElementById('report-source').textContent
+    })`);
+    assert.equal(state.first, 'AI-BARE-FIRST 过去的位置解读。', '「牌1」独占一行应被识别');
+    assert.equal(state.second, 'AI-BARE-SECOND 现在的位置解读。', '「牌2：」带冒号应被识别');
+    assert.equal(state.third, 'AI-BARE-THIRD 未来的位置解读。', '「牌3、」带顿号应被识别');
+    assert.equal(state.synthesis, 'AI-BARE-SYNTHESIS 整体串联。');
+    assert.equal(state.blessing, 'AI-BARE-BLESSING 祝福语。');
+    assert.equal(state.source, 'AI 解读');
+    assertClean(page);
+});
+
+test('AI-01：正文里提到「牌1」不会被当成段落标记', { timeout: 60000 }, async t => {
+    const text = [
+        '【牌1】',
+        'AI-INLINE-FIRST 起点。',
+        '【串联】',
+        'AI-INLINE-SYNTHESIS 这里提到牌1的意象，但不在行首。',
+        '【祝福】',
+        'AI-INLINE-BLESSING 祝福。'
+    ].join('\n');
+    const page = await newPage(t, { ai: true, aiText: text });
+    await finishSingleReading(page, 'E2E AI-01 行内提及');
+    const synthesis = await page.eval("document.getElementById('reading-synthesis-text').textContent.trim()");
+    assert.equal(synthesis, 'AI-INLINE-SYNTHESIS 这里提到牌1的意象，但不在行首。', '行内提及不应切断段落');
+    assertClean(page);
+});
+
 test('AI-07：导入超长解读时告知被精简的条数', { timeout: 30000 }, async t => {
     const page = await newPage(t);
     const longRecord = historyRecord({

@@ -1699,11 +1699,11 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     // ==========================================================================
-    // 9. AI 星见（经本机 server.js 代理调用公司模型）与命运档案
+    // 9. AI 星见（经本机 server.js 代理调用模型服务）与命运档案
     // ==========================================================================
     //
     // 工作原理：
-    //   - 页面由 server.js 托管时（http://127.0.0.1），/api/* 同源转发到公司网关，
+    //   - 页面由 server.js 托管时（http://127.0.0.1），/api/* 同源转发到上游服务，
     //     AI 解读与追问对话自动启用；
     //   - 直接双击 index.html（file://）时 AI 静默离线，
     //     一切功能回退到本地解读引擎，页面表现与之前完全一致。
@@ -1856,12 +1856,21 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // 统一解析各牌阵的输出：牌1...牌10 + 串联 + 祝福。
+    // 真实模型不一定照抄【】标记（有的会写成「牌1」「牌1：」），所以标记的判定放宽为
+    // 三种写法，但都要求出现在行首，避免正文里提到「牌1」时被误切：
+    //   1) 【牌1】        —— 提示词里的标准写法
+    //   2) 牌1：/牌1、    —— 带冒号或顿号
+    //   3) 牌1            —— 独占一行
     function parseAiReading(text) {
-        const re = /【(牌(?:[1-9]|10)|串联|祝福)】/g;
+        const re = /^[ \t]*(?:【(牌(?:[1-9]|10)|串联|祝福)】|(牌(?:[1-9]|10)|串联|祝福)[ \t]*[：:、．.]|(牌(?:[1-9]|10)|串联|祝福)[ \t]*$)/gm;
         const hits = [];
         let match;
         while ((match = re.exec(text)) !== null) {
-            hits.push({ name: match[1], start: match.index, contentStart: match.index + match[0].length });
+            hits.push({
+                name: match[1] || match[2] || match[3],
+                start: match.index,
+                contentStart: match.index + match[0].length
+            });
         }
         const sections = {};
         hits.forEach((hit, index) => {
@@ -1967,7 +1976,7 @@ document.addEventListener('DOMContentLoaded', () => {
             spread.id === 'decision' ? '二择一中 A 和 B 分别对应求问者写下的两个选项；若问题未明确写出选项，则以第一条/第二条道路分析，并在串联中邀请对方明确具体选项。比较两条路的机会与代价，不武断指定唯一答案。' : '',
             spread.id === 'daily' ? '这是每日一抽，请给出适合今天践行的主题、提醒和一件具体小事，不做远期预测。' : '',
             getSafetyRoute(userQuestion) === 'high-stakes' ? '这是高风险专业话题。只能做一般性的自我反思，不得预测诊断结果、诉讼胜负、投资收益或明确买卖操作，并明确建议寻求有资质的专业帮助。' : '',
-            `严格依次输出 ${spread.positions.length + 2} 节，每节仅以指定标记开头，标记独占一行，不要额外使用【】：`,
+            `严格依次输出 ${spread.positions.length + 2} 节。每节第一行只写标记本身（例如【牌1】），标记独占一行，不要添加其它标题或编号：`,
             ...outputSpec,
             `【串联】（${spread.id === 'celtic' ? '4-6' : '3-4'}句，整合所有位置，指出彼此的联系、主要矛盾与转化方向）`,
             '【祝福】（2-3句，给出具体可执行的建议与温暖祝福）'

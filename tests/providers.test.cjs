@@ -245,10 +245,66 @@ test('base 不带路径时自动补 /v1', async () => {
     }
 });
 
+test('anthropic 的 base 不带版本号时自动补 /v1（Kimi 那种 /coding 前缀）', async () => {
+    const mock = await startMock(() => ({ body: { content: [{ type: 'text', text: 'ok' }] } }));
+    const srv = await startServer({
+        TAROT_API_BASE: `http://127.0.0.1:${mock.port}/coding/`,
+        TAROT_API_FORMAT: 'anthropic'
+    });
+    try {
+        const res = await postChat(srv.port);
+        assert.equal(res.status, 200);
+        assert.equal(mock.seen[0].url, '/coding/v1/messages', 'Anthropic 约定 base 不含 /v1，应自动补');
+    } finally {
+        srv.stop();
+        await new Promise(r => mock.server.close(r));
+    }
+});
+
+test('base 已经写到完整端点时不再重复拼接', async () => {
+    const mock = await startMock(() => ({ body: { choices: [{ message: { content: 'ok' } }] } }));
+    const srv = await startServer({
+        TAROT_API_BASE: `http://127.0.0.1:${mock.port}/v1/chat/completions`,
+        TAROT_API_FORMAT: 'openai'
+    });
+    try {
+        const res = await postChat(srv.port);
+        assert.equal(res.status, 200);
+        assert.equal(mock.seen[0].url, '/v1/chat/completions');
+    } finally {
+        srv.stop();
+        await new Promise(r => mock.server.close(r));
+    }
+});
+
+test('anthropic 缓存命中时把 cache_read 加回输入侧，账本不记 0', async () => {
+    const mock = await startMock(() => ({
+        body: {
+            content: [{ type: 'text', text: 'ok' }],
+            usage: { input_tokens: 0, cache_creation_input_tokens: 20, cache_read_input_tokens: 91, output_tokens: 34 }
+        }
+    }));
+    const srv = await startServer({
+        TAROT_API_BASE: `http://127.0.0.1:${mock.port}/v1`,
+        TAROT_API_FORMAT: 'anthropic'
+    });
+    try {
+        const res = await postChat(srv.port);
+        assert.equal(res.status, 200);
+        const usage = readUsage(srv.usageLog);
+        assert.equal(usage[0].prompt_tokens, 111, '0 + 20 + 91');
+        assert.equal(usage[0].completion_tokens, 34);
+        assert.equal(usage[0].total_tokens, 145);
+    } finally {
+        srv.stop();
+        await new Promise(r => mock.server.close(r));
+    }
+});
+
 test('上游返回非 2xx 时仍然是通用错误，不透传原文', async () => {
     const mock = await startMock(() => ({
         status: 401,
-        body: { error: { message: 'invalid api key for tenant 47.111.246.223' } }
+        body: { error: { message: 'invalid api key for tenant upstream.example.internal' } }
     }));
     const srv = await startServer({
         TAROT_API_BASE: `http://127.0.0.1:${mock.port}/v1`,
@@ -258,7 +314,7 @@ test('上游返回非 2xx 时仍然是通用错误，不透传原文', async () 
         const res = await postChat(srv.port);
         assert.equal(res.status, 502);
         assert.equal(res.json.error, 'AI 网关暂时不可用');
-        assert.equal(JSON.stringify(res.json).includes('47.111.246.223'), false, '不应回显上游原文');
+        assert.equal(JSON.stringify(res.json).includes('upstream.example.internal'), false, '不应回显上游原文');
     } finally {
         srv.stop();
         await new Promise(r => mock.server.close(r));

@@ -2,9 +2,9 @@
  * 星见塔罗 —— AI 网关代理 + 静态服务器（零依赖，Node 18+ 直接运行）
  *
  * 为什么需要它：
- *   公司模型网关使用自签名证书，浏览器 fetch 会直接拦截；
- *   同时 file:// 页面跨域调用也会被 CORS 拦截。
- *   本服务器同时托管静态页面并同源转发 /api 请求到网关，
+ *   API Key 不能放进前端代码；而且浏览器直接 fetch 模型服务会被 CORS 拦截
+ *   （自签名证书的服务还会被证书校验拦下）。
+ *   本服务器同时托管静态页面并同源转发 /api 请求到上游，
  *   API Key 只从本机环境变量 / .env 读取，代码里不保存、也不会下发到浏览器。
  *
  * 配置 API Key（二选一）：
@@ -45,7 +45,7 @@ const TARGET_PORT = Number(process.env.TAROT_GATEWAY_PORT) || 0;
 const MODEL = String(process.env.TAROT_MODEL || '').trim();
 
 // 第三方模型服务：不绑定任何一家厂商。只要对方提供下面三种接口之一就能接：
-//   responses —— OpenAI Responses API（公司网关用的就是这种，默认）
+//   responses —— OpenAI Responses API 及兼容实现（默认）
 //   openai    —— OpenAI Chat Completions（/v1/chat/completions，兼容 OpenAI 的服务都行）
 //   anthropic —— Anthropic Messages（/v1/messages，Claude 及其兼容代理）
 // TAROT_API_BASE 填到版本号为止，如 https://api.openai.com/v1、https://api.anthropic.com/v1；
@@ -58,11 +58,11 @@ const API_FORMATS = new Set(['responses', 'openai', 'anthropic']);
 // 只认 max_tokens。默认用兼容面更广的 max_tokens，需要时用环境变量改名。
 const MAX_TOKENS_PARAM = String(process.env.TAROT_MAX_TOKENS_PARAM || '').trim() || 'max_tokens';
 
-// 本地用量账本：每条上游响应追加一行 JSONL，作为到公司核对网关账单的证据。
+// 本地用量账本：每条上游响应追加一行 JSONL，作为核对服务商账单的证据。
 // 测试可用 TAROT_USAGE_LOG 指向临时文件，避免污染项目目录。
 const USAGE_LOG = process.env.TAROT_USAGE_LOG || path.join(__dirname, 'usage-log.jsonl');
 
-// 测试专用网关覆盖：默认仍走公司网关；只有显式设置 TAROT_GATEWAY_URL 时才改道，
+// 测试专用上游覆盖：默认走上面配置的服务；只有显式设置 TAROT_GATEWAY_URL 时才改道，
 // 让回归测试可以连接本机 mock 上游，绝不会请求真实网关。
 const GATEWAY = (() => {
     if (!process.env.TAROT_GATEWAY_URL) return null;
@@ -120,8 +120,8 @@ try {
 const agent = new https.Agent(gatewayCa
     ? { ca: [gatewayCa], rejectUnauthorized: true }
     : { rejectUnauthorized: !ALLOW_INSECURE_TLS });
-// 第三方服务的证书由公共 CA 签发，不能拿公司网关的私有根证书去 pin，
-// 否则握手必然失败。所以只有「走公司网关」时才使用上面那个 pin 过的 agent。
+// 第三方服务的证书由公共 CA 签发，不能拿私有根证书去 pin，
+// 否则握手必然失败。所以只有显式配置了根证书时才使用上面那个 pin 过的 agent。
 const systemAgent = new https.Agent({ rejectUnauthorized: !ALLOW_INSECURE_TLS });
 
 // 把上面几组配置收成一个「上游端点」描述，handleChat 只认这个结构。
@@ -147,13 +147,25 @@ const PROVIDER = (() => {
         }
         const format = API_FORMATS.has(API_FORMAT_ENV) ? API_FORMAT_ENV : detectApiFormat(API_BASE);
         const suffix = format === 'anthropic' ? '/messages' : format === 'openai' ? '/chat/completions' : '/responses';
-        const basePath = url.pathname.replace(/\/+$/, '') || '/v1';
+        let basePath = url.pathname.replace(/\/+$/, '');
+        if (!basePath.endsWith(suffix)) {
+            // 两家的 base 约定不一样：
+            //   OpenAI 的 base 含版本号（https://api.openai.com/v1），SDK 只往后接 /chat/completions；
+            //   Anthropic 的 base 不含版本号（https://api.anthropic.com），SDK 自己补 /v1/messages。
+            // 所以 anthropic 只要末尾不是 /v1 就补上，其余格式只在完全没路径时补 /v1。
+            if (format === 'anthropic') {
+                if (!/\/v1$/.test(basePath)) basePath += '/v1';
+            } else if (!basePath) {
+                basePath = '/v1';
+            }
+            basePath += suffix;
+        }
         return {
             format,
             protocol: url.protocol,
             host: url.hostname,
             port: Number(url.port) || (url.protocol === 'http:' ? 80 : 443),
-            path: `${basePath}${suffix}`,
+            path: basePath,
             // 公共 CA 签发的服务用系统信任库；只有显式指定了根证书（自签网关）
             // 才拿它去 pin，否则会握手失败。
             pinned: Boolean(gatewayCa) && Boolean(GATEWAY_CA_ENV)
@@ -478,7 +490,7 @@ function buildUpstreamBody(format, input, maxTokens, reasoning) {
             messages
         };
     }
-    // responses：公司网关原生格式，原样转发
+    // responses：Responses API 原生格式，原样转发
     return {
         model: MODEL,
         input,
@@ -515,9 +527,16 @@ function normalizeUpstream(format, parsed) {
         const parts = blocks
             .filter(b => b && b.type === 'text' && typeof b.text === 'string')
             .map(b => ({ type: 'output_text', text: b.text }));
+        // Anthropic 的 input_tokens 不含缓存命中部分，命中时甚至为 0。
+        // 账本是拿来对账的，把 cache_creation / cache_read 加回输入侧才是真实用量。
+        const usage = parsed.usage && typeof parsed.usage === 'object' ? { ...parsed.usage } : undefined;
+        if (usage) {
+            const cached = Number(usage.cache_creation_input_tokens || 0) + Number(usage.cache_read_input_tokens || 0);
+            if (cached > 0) usage.input_tokens = Number(usage.input_tokens || 0) + cached;
+        }
         return {
             output: [{ type: 'message', content: parts }],
-            usage: parsed.usage
+            usage
         };
     }
     return parsed;
@@ -632,7 +651,9 @@ async function handleChat(req, res) {
             }
             // 客户端已断开时不再记账；否则先记账再响应。
             if (clientGone || res.destroyed) return;
-            recordUsage(parsed);
+            // 先归一化再记账：Anthropic 的缓存命中量要加回输入侧，账本才与真实用量一致。
+            const normalized = normalizeUpstream(PROVIDER.format, parsed);
+            recordUsage(normalized);
             // 非 2xx 一律返回通用错误；上游状态码/错误体只写服务端日志，
             // 避免把内部地址、堆栈或凭据片段透传给浏览器。排查时用 TAROT_DEBUG=1。
             if (upRes.statusCode < 200 || upRes.statusCode >= 300) {
@@ -645,7 +666,7 @@ async function handleChat(req, res) {
                 });
                 return;
             }
-            respond(upRes.statusCode, normalizeUpstream(PROVIDER.format, parsed));
+            respond(upRes.statusCode, normalized);
         });
         // 响应头已发出后上游断开：error/aborted/close 都可能触发，respond 只生效一次。
         upRes.on('error', () => { respond(502, { error: 'upstream_aborted' }); abortUpstream(); });
