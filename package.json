@@ -1,0 +1,15 @@
+{
+  "name": "xingjian-tarot",
+  "version": "1.3.2",
+  "private": true,
+  "description": "星见塔罗 —— 多牌阵、每日一抽、AI 解读与社交分享",
+  "scripts": {
+    "start": "node server.js",
+    "check": "node --check cards.js && node --check features.js && node --check insights.js && node --check learning.js && node --check audio.js && node --check app.js && node --check server.js && node --check scripts/build-card-assets.cjs && node --check scripts/build-card-deck.cjs",
+    "test": "node --test tests/features.test.cjs tests/insights.test.cjs tests/learning.test.cjs tests/quality.test.cjs tests/assets.test.cjs tests/server.test.cjs tests/server-hardening.test.cjs",
+    "test:browser": "node --test tests/browser.test.cjs"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

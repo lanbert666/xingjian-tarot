@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>星见塔罗 ── 你的专属塔罗引路人</title>
+    <meta name="description" content="星见塔罗 —— 多种牌阵、每日一抽与 AI 个性化解读，陪你看见问题的另一种可能。">
+    <meta property="og:title" content="星见塔罗 ── 你的专属塔罗引路人">
+    <meta property="og:description" content="多种牌阵、每日一抽与 AI 个性化解读，陪你看见问题的另一种可能。">
+    <meta property="og:type" content="website">
+    <meta property="og:image" content="./assets/share-card.png">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:image" content="./assets/share-card.png">
+    <meta name="twitter:title" content="星见塔罗 ── 你的专属塔罗引路人">
+    <meta name="twitter:description" content="多种牌阵、每日一抽与 AI 个性化解读，陪你看见问题的另一种可能。">
+    <meta name="theme-color" content="#07050e">
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='88'%3E🔮%3C/text%3E%3C/svg%3E">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <!-- 字体异步加载：弱网或离线时不阻塞首屏，不可达自动回退系统字体 -->
+    <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;700&family=Noto+Serif+SC:wght@300;400;700&family=Outfit:wght@300;400;600&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
+    <noscript><link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;700&family=Noto+Serif+SC:wght@300;400;700&family=Outfit:wght@300;400;600&display=swap" rel="stylesheet"></noscript>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <a class="skip-link" href="#main-content">跳到主内容</a>
+    <canvas id="starfield" aria-hidden="true"></canvas>
+    <div class="cosmic-glow glow-1" aria-hidden="true"></div>
+    <div class="cosmic-glow glow-2" aria-hidden="true"></div>
+
+    <div class="app-container">
+        <header class="app-header">
+            <h1 class="logo-text">XINGJIAN TAROT</h1>
+            <div class="title-divider" aria-hidden="true">
+                <span class="star-symbol">✦</span><span class="line"></span><span class="star-symbol">✦</span>
+            </div>
+            <p class="subtitle">星 见 塔 罗 占 卜 仪 轨</p>
+            <div class="ai-status-row">
+                <span id="ai-status-badge" class="ai-status-badge offline" role="status" aria-live="polite">⚪ 本地解读引擎</span>
+                <button id="btn-daily" class="history-btn" type="button">✦ 今日一抽</button>
+                <button id="btn-history" class="history-btn" type="button" aria-haspopup="dialog" aria-controls="history-panel" aria-expanded="false">🕰 命运档案</button>
+                <button id="btn-learning" class="history-btn" type="button" aria-haspopup="dialog" aria-controls="learning-panel" aria-expanded="false">📖 牌义图鉴</button>
+                <button id="btn-sound" class="history-btn sound-toggle" type="button" aria-pressed="false" aria-label="音效开关（默认静音）" title="开启音效">♪</button>
+            </div>
+        </header>
+
+        <main id="main-content" class="console-box glass-panel" tabindex="-1">
+            <!-- STEP 1: 问题与牌阵 -->
+            <section id="step-listen" class="step-section active">
+                <h2 class="sr-only" data-view-heading tabindex="-1">第一步：提出你的问题</h2>
+                <div class="oracle-profile animate-fade-in">
+                    <div class="oracle-avatar"><div class="avatar-ring"></div><div class="avatar-icon">🔮</div></div>
+                    <h2 class="oracle-name">星见 (Xingjian)</h2>
+                    <p class="oracle-title">资深皇家韦特塔罗占卜师</p>
+                </div>
+                <div class="poetic-speech">
+                    <p id="welcome-text">“你好，迷途的旅人。我是星见，你的专属塔罗引路人。命运的星轨指引你来到这里，请深呼吸，在心中默念你的困惑。告诉我，你今天想在命运的画布上窥探些什么？”</p>
+                </div>
+                <div class="form-group">
+                    <label for="user-question" class="input-label">请在命运画布上写下你的困惑</label>
+                    <div class="input-wrapper">
+                        <input type="text" id="user-question" placeholder="如：我的感情走向、事业抉择、近期运势…" autocomplete="off" aria-describedby="question-counter">
+                        <button id="btn-next-step" class="glow-button" type="button"><span>聆听命运</span><span class="btn-ripple"></span></button>
+                    </div>
+                    <p id="question-counter" class="char-counter" aria-live="polite">0 / 200</p>
+                </div>
+                <p class="privacy-note">历史仅保存在此浏览器。AI 在线时，问题与牌面会发送至模型网关；请勿填写姓名、联系方式等隐私信息。</p>
+                <div class="quick-tags">
+                    <span class="tag-title">选择占卜方向：</span>
+                    <button class="quick-tag" data-category="love" type="button">💖 感情走向</button>
+                    <button class="quick-tag" data-category="career" type="button">💼 事业抉择</button>
+                    <button class="quick-tag" data-category="fortune" type="button">🪙 近期运势</button>
+                    <button class="quick-tag" data-category="general" type="button">🌌 灵性启示</button>
+                </div>
+
+                <fieldset class="spread-picker">
+                    <legend>选择你的占卜牌阵</legend>
+                    <div class="spread-options">
+                        <button class="spread-option" data-spread="single" type="button" aria-pressed="false">
+                            <span class="spread-option-name">灵光快占 <small>1 张</small></span>
+                            <span class="spread-option-desc">一个清晰的核心启示</span>
+                        </button>
+                        <button class="spread-option" data-spread="decision" type="button" aria-pressed="false">
+                            <span class="spread-option-name">二择一 <small>3 张</small></span>
+                            <span class="spread-option-desc">比较 A / B 两条道路</span>
+                        </button>
+                        <button class="spread-option selected" data-spread="trinity" type="button" aria-pressed="true">
+                            <span class="spread-option-name">圣三角 <small>3 张</small></span>
+                            <span class="spread-option-desc">过去 · 现在 · 未来</span>
+                        </button>
+                        <button class="spread-option" data-spread="celtic" type="button" aria-pressed="false">
+                            <span class="spread-option-name">凯尔特十字 <small>10 张</small></span>
+                            <span class="spread-option-desc">复杂问题的全景深读</span>
+                        </button>
+                    </div>
+                    <p id="spread-description" class="spread-description">沿过去、现在与未来梳理完整的能量轨迹</p>
+                </fieldset>
+
+                <div class="daily-entry">
+                    <div><span class="daily-entry-title">✦ 今日星语</span><span id="daily-entry-status">每天一张牌，留住与自己相处的片刻</span></div>
+                    <button id="btn-daily-entry" class="text-btn" type="button">抽取今日牌 →</button>
+                </div>
+            </section>
+
+            <!-- STEP 2: 洗牌与抽牌，槽位按牌阵生成 -->
+            <section id="step-draw" class="step-section">
+                <h2 class="sr-only" data-view-heading tabindex="-1">第二步：洗牌并抽牌</h2>
+                <div class="step-info">
+                    <span class="step-badge" id="draw-spread-name">占卜法阵：圣三角</span>
+                    <p class="speech-bubble" id="draw-speech">“命运的齿轮已开始咬合，我正在为你洗牌、切牌… 请凭直觉依次抽取三张属于你的宿命卡牌。”</p>
+                    <p id="draw-status" class="sr-only" role="status" aria-live="polite" tabindex="-1"></p>
+                </div>
+                <div class="deck-area"><div class="deck-container" id="tarot-deck"></div></div>
+                <div class="draw-controls">
+                    <button id="btn-shuffle" class="mystic-btn" type="button"><span class="icon">✨</span> 重新洗牌</button>
+                    <button id="btn-auto-draw" class="mystic-btn gold-border" type="button"><span class="icon">🪄</span> 自动抽牌</button>
+                </div>
+                <div class="slots-container" id="slots-container"></div>
+                <div class="action-footer">
+                    <button id="btn-back-to-question" class="text-btn" type="button">← 修改困惑与牌阵</button>
+                    <button id="btn-go-reveal" class="glow-button hidden" type="button"><span>揭示天机</span></button>
+                </div>
+            </section>
+
+            <!-- STEP 3: 翻牌与动态报告 -->
+            <section id="step-reveal" class="step-section">
+                <h2 class="sr-only" data-view-heading tabindex="-1">第三步：揭示天机与解读</h2>
+                <div class="reveal-topbar">
+                    <button id="btn-reveal-back" class="text-btn reveal-back" type="button">← 返回首页</button>
+                </div>
+                <div class="reveal-question-banner">
+                    <span class="question-prefix" id="reveal-spread-name">圣三角 · 求问主题：</span>
+                    <span class="question-text" id="reveal-question-display"></span>
+                </div>
+                <div class="reveal-cards-display" id="reveal-cards-display"></div>
+                <div class="flip-tip">🔮 点击上方的卡牌，揭示神秘的命运图卷…</div>
+                <div class="reading-report-panel glass-panel hidden" id="reading-report" tabindex="-1" aria-label="本次占卜解读报告">
+                    <div class="report-header"><span class="seal-icon">✦ 星见启示录 ✦</span><span id="report-source" class="report-source">本地解读</span><button id="btn-ai-retry" class="mystic-btn ai-retry hidden" type="button"><span class="icon">↻</span> 重试 AI 解读</button></div>
+                    <div id="ai-progress" class="ai-progress hidden">
+                        <span id="ai-progress-text" role="status" aria-live="polite">✦ 星见正在感应星轨…</span>
+                        <button id="btn-ai-cancel" class="text-btn ai-cancel" type="button">取消生成</button>
+                    </div>
+                    <nav id="report-nav" class="report-nav" aria-label="报告导航">
+                        <span class="report-nav-label">报告目录</span>
+                        <div id="report-position-links" class="report-position-links"></div>
+                        <div class="report-nav-actions">
+                            <button id="btn-report-reflection" class="report-nav-link" type="button">行动与复盘</button>
+                            <button id="btn-report-top" class="report-nav-link" type="button">回到顶部</button>
+                        </div>
+                    </nav>
+                    <div class="report-content">
+                        <div id="reading-blocks" class="reading-blocks"></div>
+                        <p id="report-source-footer" class="report-source-footer">解读来源：<span id="report-source-footer-text">本地解读</span></p>
+                        <div class="reading-block ai-chat-block hidden" id="ai-chat-block">
+                            <h3 class="block-title font-cinzel">💬 与星见继续对谈 (Ask Xingjian)</h3>
+                            <div class="ai-chat-messages" id="ai-chat-messages" role="log" aria-live="polite" aria-relevant="additions"></div>
+                            <div class="ai-chat-input-row">
+                                <textarea id="ai-chat-input" rows="2" placeholder="就这次占卜，继续向星见追问…" aria-label="就这次占卜继续追问" aria-describedby="ai-chat-counter"></textarea>
+                                <button id="ai-chat-send" class="glow-button" type="button"><span>发送</span></button>
+                            </div>
+                            <p id="ai-chat-counter" class="char-counter" aria-live="polite">0 / 500</p>
+                        </div>
+                    </div>
+                    <section class="reflection-card" id="reflection-card" aria-labelledby="reflection-title" tabindex="-1">
+                        <div class="reflection-heading">
+                            <div>
+                                <span class="reflection-kicker">ACTION & REFLECTION</span>
+                                <h3 id="reflection-title">把启示带回生活</h3>
+                            </div>
+                            <span id="reflection-save-status" class="reflection-status" role="status"></span>
+                        </div>
+                        <label for="action-input">接下来，你愿意尝试哪一件小事？</label>
+                        <textarea id="action-input" rows="3" maxlength="500" placeholder="例如：今晚用十分钟写下真正介意的事，再决定是否沟通。"></textarea>
+                        <div class="reflection-controls">
+                            <label for="review-offset">复盘提醒
+                                <select id="review-offset">
+                                    <option value="keep">保持当前</option>
+                                    <option value="7">7 天后</option>
+                                    <option value="30">30 天后</option>
+                                    <option value="">取消提醒</option>
+                                </select>
+                            </label>
+                            <button id="btn-save-reflection" class="mystic-btn gold-border" type="button">保存行动与复盘</button>
+                        </div>
+                        <div class="quality-feedback" role="group" aria-label="解读质量反馈">
+                            <span>这次解读对你有帮助吗？</span>
+                            <button type="button" data-feedback="helpful" aria-pressed="false">有帮助</button>
+                            <button type="button" data-feedback="unhelpful" aria-pressed="false">没帮助</button>
+                            <small>反馈仅保存在此浏览器，用于复盘，不会发送给模型。</small>
+                        </div>
+                    </section>
+                    <div class="report-footer">
+                        <button id="btn-share-report" class="mystic-btn gold-border" type="button" aria-haspopup="dialog" aria-controls="share-panel" aria-expanded="false"><span class="icon">✦</span> 分享星语</button>
+                        <button id="btn-save-report" class="mystic-btn" type="button"><span class="icon">💾</span> <span class="save-label">保存完整长图</span></button>
+                        <button id="btn-restart" class="glow-button" type="button"><span>再启星轨</span></button>
+                    </div>
+                </div>
+            </section>
+        </main>
+
+        <footer class="app-footer">
+            <p>© 2026 XINGJIAN TAROT. 命运是流动的星河，而非不可改变的石碑。</p>
+            <p class="disclaimer">✦ 灵性指引仅供心灵启发，涉及医疗、法律与金融投资请咨询专业人士 ✦</p>
+        </footer>
+    </div>
+
+    <!-- 历史档案 -->
+    <div id="history-panel" class="history-panel hidden" role="dialog" aria-modal="true" aria-labelledby="history-title">
+        <div class="history-panel-inner glass-panel">
+            <div class="history-header"><h2 id="history-title">🕰 命运档案馆</h2><button id="btn-history-close" class="history-close" type="button" aria-label="关闭">✕</button></div>
+            <div class="history-toolbar">
+                <input id="history-search" type="search" placeholder="搜索问题、牌面、解读或笔记" aria-label="搜索档案">
+                <select id="history-category" aria-label="按占卜方向筛选">
+                    <option value="all">全部方向</option><option value="love">感情</option><option value="career">事业</option><option value="fortune">运势</option><option value="general">灵性</option>
+                </select>
+                <select id="history-review-filter" aria-label="按复盘状态筛选">
+                    <option value="all">全部状态</option><option value="due">待复盘</option><option value="upcoming">未到复盘日</option><option value="completed">已复盘</option><option value="none">未设复盘</option>
+                </select>
+            </div>
+            <p id="history-review-summary" class="history-review-summary" role="status"></p>
+            <section id="insights-panel" class="insights-panel" aria-labelledby="insights-title">
+                <div class="insights-heading">
+                    <div>
+                        <span class="insights-kicker">STAR MAP INSIGHT</span>
+                        <h3 id="insights-title">✦ 星图洞察</h3>
+                    </div>
+                    <span class="insights-hint">仅基于本机档案</span>
+                </div>
+                <div id="insights-body" class="insights-body"></div>
+            </section>
+            <div id="history-list" class="history-list"></div>
+            <div class="history-actions">
+                <button id="btn-history-export" class="mystic-btn" type="button">导出备份</button>
+                <button id="btn-history-import" class="mystic-btn" type="button">导入合并</button>
+                <input id="history-import-file" class="hidden" type="file" accept="application/json,.json">
+                <button id="btn-history-clear" class="mystic-btn danger-btn" type="button"><span class="icon">🗑</span> 清空档案</button>
+            </div>
+            <p id="usage-summary" class="usage-summary hidden"></p>
+        </div>
+    </div>
+
+    <!-- 牌义学习图鉴：按需打开，不打断主流程 -->
+    <div id="learning-panel" class="history-panel learning-panel hidden" role="dialog" aria-modal="true" aria-labelledby="learning-title">
+        <div class="learning-panel-inner glass-panel">
+            <div class="history-header">
+                <h2 id="learning-title">📖 牌义学习图鉴</h2>
+                <button id="btn-learning-close" class="history-close" type="button" aria-label="关闭牌义图鉴">✕</button>
+            </div>
+            <p class="learning-intro">牌义是观察的镜子，不是固定的判决。正逆位关键词来自牌库；逆位表示能量受阻、内转或过度，并不等于坏结果。</p>
+            <details id="learning-spreads" class="learning-spreads">
+                <summary>牌阵位置说明（二择一 / 圣三角 / 凯尔特十字）</summary>
+                <div id="learning-spreads-body" class="learning-spreads-body"></div>
+            </details>
+            <div class="learning-toolbar">
+                <label class="sr-only" for="learning-search">搜索牌名、关键词或象征</label>
+                <input id="learning-search" type="search" placeholder="搜索牌名、关键词或象征…" autocomplete="off">
+                <div id="learning-filters" class="learning-filters" role="group" aria-label="按牌组筛选">
+                    <button type="button" class="learning-filter active" data-learning-filter="all" aria-pressed="true">全部 78</button>
+                    <button type="button" class="learning-filter" data-learning-filter="major" aria-pressed="false">大阿卡纳 22</button>
+                    <button type="button" class="learning-filter" data-learning-filter="wands" aria-pressed="false">权杖 14</button>
+                    <button type="button" class="learning-filter" data-learning-filter="cups" aria-pressed="false">圣杯 14</button>
+                    <button type="button" class="learning-filter" data-learning-filter="swords" aria-pressed="false">宝剑 14</button>
+                    <button type="button" class="learning-filter" data-learning-filter="pentacles" aria-pressed="false">星币 14</button>
+                    <button type="button" class="learning-filter" data-learning-filter="court" aria-pressed="false">宫廷牌 16</button>
+                </div>
+            </div>
+            <p id="learning-count" class="learning-count" role="status"></p>
+            <div id="learning-list" class="learning-list"></div>
+        </div>
+    </div>
+
+    <!-- 竖版社交分享卡片 -->
+    <div id="share-panel" class="share-panel hidden" role="dialog" aria-modal="true" aria-labelledby="share-title">
+        <div class="share-panel-inner glass-panel">
+            <div class="history-header"><h2 id="share-title">✦ 把今日星语分享出去</h2><button id="btn-share-close" class="history-close" type="button" aria-label="关闭">✕</button></div>
+            <div class="share-content">
+                <div id="share-preview" class="share-preview">
+                    <div class="share-stars" aria-hidden="true">✦　·　✧　·　✦</div>
+                    <div class="share-brand">XINGJIAN TAROT</div>
+                    <div class="share-rule"></div>
+                    <div id="share-spread" class="share-spread"></div>
+                    <div id="share-question" class="share-question"></div>
+                    <div id="share-mini-cards" class="share-mini-cards"></div>
+                    <div id="share-insight" class="share-insight"></div>
+                    <div id="share-blessing" class="share-blessing"></div>
+                    <div class="share-bottom"><span id="share-date"></span><span>命运并非定数，而是选择的回响</span></div>
+                </div>
+                <div class="share-tools">
+                    <fieldset class="share-privacy">
+                        <legend>分享隐私</legend>
+                        <label><input type="radio" name="share-privacy" value="private" checked> 匿名分享（推荐）</label>
+                        <label><input type="radio" name="share-privacy" value="full"> 包含原始问题</label>
+                        <p>匿名模式不会把原始问题放进图片或自动配文。</p>
+                    </fieldset>
+                    <label for="share-caption">配文已备好，可自由修改</label>
+                    <textarea id="share-caption" rows="8"></textarea>
+                    <button id="btn-share-image" class="glow-button" type="button"><span>下载分享卡片</span></button>
+                    <button id="btn-share-copy" class="mystic-btn" type="button">复制分享文案</button>
+                    <button id="btn-share-native" class="mystic-btn" type="button">系统分享</button>
+                    <p class="share-tip">竖版卡片适合小红书、抖音与朋友圈；也可以只复制文案。</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="safety-panel" class="history-panel hidden" role="dialog" aria-modal="true" aria-labelledby="safety-title" aria-describedby="safety-description">
+        <div class="safety-panel-inner glass-panel">
+            <div class="history-header"><h2 id="safety-title">此刻，你的安全比占卜更重要</h2><button id="btn-safety-close" class="history-close" type="button" aria-label="关闭">✕</button></div>
+            <p id="safety-description">看到你正在经历很强烈的痛苦。塔罗无法处理危机，也不该成为此刻唯一的支撑。</p>
+            <ul>
+                <li>如果你可能马上伤害自己，请立即联系当地急救或报警电话，或前往最近的急诊。</li>
+                <li>先离开可能用来伤害自己的物品，联系一位可信任的人，请对方现在陪着你。</li>
+                <li>如果在中国大陆，可拨打 <a href="tel:120">120</a> / <a href="tel:110">110</a>；其他地区请使用当地紧急服务或危机热线。</li>
+            </ul>
+            <p class="safety-kind">你不需要独自撑过这一刻。本次输入没有被发送给 AI，也没有写入占卜档案。</p>
+            <button id="btn-safety-understood" class="glow-button" type="button"><span>我知道了，先寻求现实帮助</span></button>
+        </div>
+    </div>
+
+    <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
+    <div id="particle-layer" aria-hidden="true"></div>
+
+    <!-- 普通脚本确保 file:// 离线可用；加载顺序不可调整。
+         vendor/html2canvas.min.js 由 app.js 在保存/分享图片时按需加载，首屏不下载。 -->
+    <script src="cards.js"></script>
+    <script src="features.js"></script>
+    <script src="insights.js"></script>
+    <script src="learning.js"></script>
+    <script src="assets/cards/manifest.js"></script>
+    <script src="audio.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>

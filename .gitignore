@@ -1,0 +1,43 @@
+# API 密钥（server.js 从环境变量或本文件读取）
+.env
+.env.*
+
+# 网关自签证书（server.js 用它开启完整 TLS 校验，见 README）
+gateway-ca.crt
+
+# 依赖（本项目零运行时依赖，node_modules 已不再需要，可安全删除）
+node_modules/
+
+# 本地验收截图 / 临时文件
+.tmp-*
+
+# 日志
+*.log
+npm-debug.log*
+yarn-error.log*
+
+# 本机 AI 用量账本（含调用时间与 token 数，仅用于本地对账）
+usage-log.jsonl
+
+# 编辑器 / 系统
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# 示例配置不含真实值，允许提交（须写在 .env.* 之后才能覆盖）
+!.env.example
+
+# 课程交付物与审计工作区（体积大，不进版本库）
+audit-ux/
+audit-lab1/
+slides/
+hw/
+_lab1_guide.txt
+
+# 牌面母版与历史样张：README 声明不对外提供
+assets/cards/tarot-cards/
+assets/cards/masters/
+
+# Python 缓存
+__pycache__/
