@@ -37,14 +37,12 @@ const MAX_UPSTREAM_BYTES = 2 * 1024 * 1024;
 const USAGE_MAX_BYTES = 5 * 1024 * 1024;
 const activeUpstreams = new Set();
 let shuttingDown = false;
-// 开箱即用的默认网关：克隆者只需配置 TAROT_API_KEY 就能用上完整 AI 功能。
-// 需要指向别的网关时，用 TAROT_GATEWAY_HOST / TAROT_GATEWAY_PORT / TAROT_MODEL 覆盖即可。
-const DEFAULT_GATEWAY_HOST = '47.111.246.223';
-const DEFAULT_GATEWAY_PORT = 52000;
-const DEFAULT_MODEL = 'DeepSeek-V4-Flash-0731';
-const TARGET_HOST = String(process.env.TAROT_GATEWAY_HOST || DEFAULT_GATEWAY_HOST).trim();
-const TARGET_PORT = Number(process.env.TAROT_GATEWAY_PORT) || DEFAULT_GATEWAY_PORT;
-const MODEL = String(process.env.TAROT_MODEL || DEFAULT_MODEL).trim();
+// 网关地址与模型名属于部署方私有配置，不写进版本库：
+// 在 .env（已 gitignore）里设置 TAROT_GATEWAY_HOST / TAROT_GATEWAY_PORT / TAROT_MODEL。
+// 未配置时服务器照常启动，/api/chat 返回 503，页面回退本地解读引擎。
+const TARGET_HOST = String(process.env.TAROT_GATEWAY_HOST || '').trim();
+const TARGET_PORT = Number(process.env.TAROT_GATEWAY_PORT) || 0;
+const MODEL = String(process.env.TAROT_MODEL || '').trim();
 
 // 本地用量账本：每条上游响应追加一行 JSONL，作为到公司核对网关账单的证据。
 // 测试可用 TAROT_USAGE_LOG 指向临时文件，避免污染项目目录。
@@ -379,6 +377,8 @@ function readUsageByDay() {
 // 转发对话请求到网关的 Responses API
 async function handleChat(req, res) {
     if (!API_KEY) return sendJson(res, 503, { error: 'AI 未配置：请设置 TAROT_API_KEY 后重启服务器' });
+    if (!GATEWAY && !TARGET_HOST) return sendJson(res, 503, { error: 'AI 未配置：请设置 TAROT_GATEWAY_HOST 后重启服务器' });
+    if (!MODEL) return sendJson(res, 503, { error: 'AI 未配置：请设置 TAROT_MODEL 后重启服务器' });
 
     // Host 校验：只接受本机地址，挡住 DNS rebinding 把攻击者域名解析到 127.0.0.1。
     if (!isLocalHost(req.headers.host)) return sendJson(res, 403, { error: 'forbidden host' });
@@ -557,7 +557,7 @@ async function handleRequest(req, res) {
         if (req.method !== 'GET' && req.method !== 'HEAD') return sendMethodNotAllowed(res, 'GET, HEAD');
         if (!isLocalHost(req.headers.host)) return sendJson(res, 403, { error: 'forbidden host' });
         // 只告知是否已配置，不下发模型名：前端不需要，也不该让页面暴露后端选型。
-        return sendJson(res, 200, { ai: Boolean(API_KEY) });
+        return sendJson(res, 200, { ai: Boolean(API_KEY && MODEL && (GATEWAY || TARGET_HOST)) });
     }
     // 本机用量汇总：只允许本机 Host 读取，返回按天聚合的请求数与本机账本 token 数。
     if (url === '/api/usage') {
@@ -683,8 +683,8 @@ server.on('error', err => {
 server.listen(LISTEN_PORT, '127.0.0.1', () => {
     activePort = server.address().port;
     console.log(`星见塔罗 AI 服务器已启动: http://127.0.0.1:${activePort}`);
-    if (API_KEY) {
-        console.log(`模型: ${MODEL}（经网关 ${GATEWAY ? GATEWAY.host : `${TARGET_HOST}:${TARGET_PORT}`} 转发）`);
+    if (API_KEY && MODEL && (GATEWAY || TARGET_HOST)) {
+        console.log(`AI 已启用：${MODEL} @ ${GATEWAY ? GATEWAY.host : `${TARGET_HOST}:${TARGET_PORT}`}`);
         // http 网关会把 Bearer 明文发到网络上；只适合本机 mock，生产必须 https。
         if (GATEWAY && GATEWAY.protocol === 'http:') {
             console.warn('');
@@ -708,7 +708,12 @@ server.listen(LISTEN_PORT, '127.0.0.1', () => {
             }
         }
     } else {
-        console.log('未配置 TAROT_API_KEY，AI 功能离线；页面将自动使用本地解读引擎。');
+        const missing = [];
+        if (!API_KEY) missing.push('TAROT_API_KEY');
+        if (!GATEWAY && !TARGET_HOST) missing.push('TAROT_GATEWAY_HOST');
+        if (!MODEL) missing.push('TAROT_MODEL');
+        console.log(`AI 功能离线：缺少 ${missing.join(' / ')}；页面将自动使用本地解读引擎。`);
+        console.log('配置方法：把 .env.example 复制为 .env，填好上述变量后重启。');
     }
 });
 

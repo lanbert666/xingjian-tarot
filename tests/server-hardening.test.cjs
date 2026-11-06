@@ -254,7 +254,12 @@ test('网关证书：配置错误 CA 时握手失败并返回 502', async () => 
 });
 
 test('网关证书：未配置时启动打印中间人风险警告', async () => {
-    const server = await startServer({ TAROT_API_KEY: 'sk-test-fake', TAROT_GATEWAY_CA: missingCa });
+    const server = await startServer({
+        TAROT_API_KEY: 'sk-test-fake',
+        TAROT_GATEWAY_HOST: 'gateway.example.com',
+        TAROT_GATEWAY_PORT: '52000',
+        TAROT_GATEWAY_CA: missingCa
+    });
     try {
         assert.ok(await waitForStderr(server, /未配置网关证书/), '应提示未配置网关证书，实际 stderr：' + JSON.stringify(server.stderr()));
         const stderr = server.stderr();

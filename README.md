@@ -15,10 +15,15 @@
 
 ### AI 模式
 
-**只需要一个 API Key。** 在项目根目录新建 `.env`（已 gitignore，不会进版本库），写一行：
+不配置也能用：所有牌阵、本地解读、每日一抽、档案、分享功能完全不受影响，只是报告由本地解读引擎生成。
+
+要接模型，复制 `.env.example` 为 `.env`（已 gitignore，不会进版本库），填好四项：
 
 ```bash
 TAROT_API_KEY=sk-...
+TAROT_GATEWAY_HOST=gateway.example.com   # 换成网关运营方给你的地址
+TAROT_GATEWAY_PORT=52000
+TAROT_MODEL=your-model-name
 ```
 
 然后 `npm start`，打开 [http://127.0.0.1:8901](http://127.0.0.1:8901)。
@@ -27,22 +32,21 @@ TAROT_API_KEY=sk-...
 也可以临时用环境变量（PowerShell）：
 
 ```powershell
-$env:TAROT_API_KEY="sk-..."; node server.js
+$env:TAROT_API_KEY="sk-..."; $env:TAROT_GATEWAY_HOST="gateway.example.com"
+$env:TAROT_GATEWAY_PORT="52000"; $env:TAROT_MODEL="your-model-name"; node server.js
 ```
 
-网关地址、端口与模型名**已经内置默认值**，克隆下来不用管；只有要指向别的网关时才需要覆盖：
-
-| 变量 | 默认值 | 说明 |
+| 变量 | 必填 | 说明 |
 | --- | --- | --- |
-| `TAROT_API_KEY` | 无 | **必填**，缺省时 AI 关闭、页面自动回退本地解读 |
-| `TAROT_GATEWAY_HOST` | 内置 | 网关主机，一般不用改；要改时形如 `gateway.example.com` |
-| `TAROT_GATEWAY_PORT` | 内置 | 网关端口，一般不用改；要改时形如 `52000` |
-| `TAROT_MODEL` | 内置 | 模型标识，一般不用改；要改时形如 `your-model-name` |
-| `PORT` | `8901` | 本地监听端口 |
-| `TAROT_GATEWAY_CA` | `gateway-ca.crt` | 网关根证书路径（见下节） |
+| `TAROT_API_KEY` | 是 | AI 接口密钥 |
+| `TAROT_GATEWAY_HOST` | 是 | 网关主机，形如 `gateway.example.com` |
+| `TAROT_GATEWAY_PORT` | 是 | 网关端口，形如 `52000` |
+| `TAROT_MODEL` | 是 | 网关使用的模型标识 |
+| `PORT` | 否 | 本地监听端口，默认 `8901` |
+| `TAROT_GATEWAY_CA` | 否 | 网关根证书路径，默认 `gateway-ca.crt`（见下节） |
 
-没配 Key 也能用：所有牌阵、本地解读、每日一抽、档案、分享功能完全不受影响，
-只是报告由本地解读引擎生成，不会调用模型。
+四项缺任意一项时，服务器照常启动并打印缺少哪几项，`/api/chat` 返回 503、
+`/api/config` 报 `{"ai":false}`，页面自动回退本地解读引擎，不会打断抽牌流程。
 
 也可以直接用 `npm start`（等价于 `node server.js`）。
 
