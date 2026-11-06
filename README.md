@@ -33,6 +33,9 @@ TAROT_API_BASE=https://api.anthropic.com/v1
 TAROT_MODEL=claude-sonnet-4-5
 ```
 
+> Anthropic 的 Messages 接口就是 `https://api.anthropic.com/v1/messages`，`/v1` 是路径的一部分
+> （不带 `/v1` 请求会 404）。写成 `https://api.anthropic.com` 也可以，服务端会自动补 `/v1`。
+
 然后 `npm start`，打开 [http://127.0.0.1:8901](http://127.0.0.1:8901)。
 头部显示「AI 星见在线」后，解读报告会由模型实时生成，并可在报告底部继续追问。
 
