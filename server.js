@@ -44,6 +44,17 @@ const TARGET_HOST = String(process.env.TAROT_GATEWAY_HOST || '').trim();
 const TARGET_PORT = Number(process.env.TAROT_GATEWAY_PORT) || 0;
 const MODEL = String(process.env.TAROT_MODEL || '').trim();
 
+// 第三方模型服务：不绑定任何一家厂商。只要对方提供下面三种接口之一就能接：
+//   responses —— OpenAI Responses API（公司网关用的就是这种，默认）
+//   openai    —— OpenAI Chat Completions（/v1/chat/completions，兼容 OpenAI 的服务都行）
+//   anthropic —— Anthropic Messages（/v1/messages，Claude 及其兼容代理）
+// TAROT_API_BASE 填到版本号为止，如 https://api.openai.com/v1、https://api.anthropic.com/v1；
+// 末尾没有路径时自动补 /v1。TAROT_API_FORMAT 省略时按 base 里的域名猜，
+// 猜不出就按 openai 处理（最常见）。
+const API_BASE = String(process.env.TAROT_API_BASE || '').trim();
+const API_FORMAT_ENV = String(process.env.TAROT_API_FORMAT || '').trim().toLowerCase();
+const API_FORMATS = new Set(['responses', 'openai', 'anthropic']);
+
 // 本地用量账本：每条上游响应追加一行 JSONL，作为到公司核对网关账单的证据。
 // 测试可用 TAROT_USAGE_LOG 指向临时文件，避免污染项目目录。
 const USAGE_LOG = process.env.TAROT_USAGE_LOG || path.join(__dirname, 'usage-log.jsonl');
@@ -106,7 +117,62 @@ try {
 const agent = new https.Agent(gatewayCa
     ? { ca: [gatewayCa], rejectUnauthorized: true }
     : { rejectUnauthorized: !ALLOW_INSECURE_TLS });
-const GATEWAY_USES_TLS = !GATEWAY || GATEWAY.protocol === 'https:';
+// 第三方服务的证书由公共 CA 签发，不能拿公司网关的私有根证书去 pin，
+// 否则握手必然失败。所以只有「走公司网关」时才使用上面那个 pin 过的 agent。
+const systemAgent = new https.Agent({ rejectUnauthorized: !ALLOW_INSECURE_TLS });
+
+// 把上面几组配置收成一个「上游端点」描述，handleChat 只认这个结构。
+// 优先级：TAROT_API_BASE（任意厂商）> TAROT_GATEWAY_URL（测试/自建）> TAROT_GATEWAY_HOST。
+function detectApiFormat(base) {
+    const lower = base.toLowerCase();
+    if (lower.includes('anthropic') || lower.includes('claude')) return 'anthropic';
+    return 'openai';
+}
+
+const PROVIDER = (() => {
+    if (API_BASE) {
+        let url;
+        try {
+            url = new URL(API_BASE);
+        } catch {
+            console.error(`TAROT_API_BASE 不是合法 URL：${API_BASE}（应形如 https://api.openai.com/v1）`);
+            return null;
+        }
+        if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+            console.error(`TAROT_API_BASE 只支持 http/https：${API_BASE}`);
+            return null;
+        }
+        const format = API_FORMATS.has(API_FORMAT_ENV) ? API_FORMAT_ENV : detectApiFormat(API_BASE);
+        const suffix = format === 'anthropic' ? '/messages' : format === 'openai' ? '/chat/completions' : '/responses';
+        const basePath = url.pathname.replace(/\/+$/, '') || '/v1';
+        return {
+            format,
+            protocol: url.protocol,
+            host: url.hostname,
+            port: Number(url.port) || (url.protocol === 'http:' ? 80 : 443),
+            path: `${basePath}${suffix}`,
+            // 公共 CA 签发的服务用系统信任库；只有显式指定了根证书（自签网关）
+            // 才拿它去 pin，否则会握手失败。
+            pinned: Boolean(gatewayCa) && Boolean(GATEWAY_CA_ENV)
+        };
+    }
+    if (GATEWAY) return { format: 'responses', ...GATEWAY, pinned: true };
+    if (TARGET_HOST) {
+        return {
+            format: 'responses',
+            protocol: 'https:',
+            host: TARGET_HOST,
+            port: TARGET_PORT || 443,
+            path: '/v1/responses',
+            pinned: true
+        };
+    }
+    return null;
+})();
+if (API_FORMAT_ENV && !API_FORMATS.has(API_FORMAT_ENV)) {
+    console.error(`TAROT_API_FORMAT 只支持 ${[...API_FORMATS].join(' / ')}，已忽略：${API_FORMAT_ENV}`);
+}
+const GATEWAY_USES_TLS = !PROVIDER || PROVIDER.protocol === 'https:';
 // 项目根的真实路径：静态文件 realpath 后用它判断是否越界（项目本身可能位于 junction 下）。
 const ROOT_REAL = (() => {
     try { return fs.realpathSync(__dirname); } catch { return __dirname; }
@@ -374,10 +440,90 @@ function readUsageByDay() {
     return days;
 }
 
-// 转发对话请求到网关的 Responses API
+// 页面统一按 Responses API 的形状发消息：input = [{ role, content: [{ type, text }] }]。
+// 下面把它翻译成各家接口的请求体，再把响应翻译回同一种形状，
+// 这样前端一行都不用改，换供应商只改 .env。
+function flattenMessage(message) {
+    return message.content.map(c => c.text).join('\n');
+}
+
+function buildUpstreamBody(format, input, maxTokens, reasoning) {
+    if (format === 'openai') {
+        return {
+            model: MODEL,
+            messages: input.map(m => ({ role: m.role, content: flattenMessage(m) })),
+            max_tokens: maxTokens
+        };
+    }
+    if (format === 'anthropic') {
+        // Anthropic 把 system 单独放一个字段，messages 里只能出现 user/assistant，
+        // 且首条必须是 user，否则 400。
+        const systemParts = [];
+        const messages = [];
+        for (const m of input) {
+            const text = flattenMessage(m);
+            if (m.role === 'system') systemParts.push(text);
+            else messages.push({ role: m.role === 'assistant' ? 'assistant' : 'user', content: text });
+        }
+        if (messages.length === 0 || messages[0].role !== 'user') {
+            messages.unshift({ role: 'user', content: '（继续）' });
+        }
+        return {
+            model: MODEL,
+            max_tokens: maxTokens,
+            ...(systemParts.length ? { system: systemParts.join('\n\n') } : {}),
+            messages
+        };
+    }
+    // responses：公司网关原生格式，原样转发
+    return {
+        model: MODEL,
+        input,
+        max_output_tokens: maxTokens,
+        ...(reasoning && typeof reasoning === 'object' ? { reasoning } : {})
+    };
+}
+
+function upstreamHeaders(format, bodyText) {
+    const base = {
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(bodyText)
+    };
+    if (format === 'anthropic') {
+        return { ...base, 'x-api-key': API_KEY, 'anthropic-version': '2023-06-01' };
+    }
+    return { ...base, 'Authorization': `Bearer ${API_KEY}` };
+}
+
+// 把上游响应翻译回 Responses 形状：output[].content[].{ type: 'output_text', text }。
+// 前端只认这一种，翻译放在服务端，换供应商时页面无需感知。
+function normalizeUpstream(format, parsed) {
+    if (format === 'openai') {
+        const choice = Array.isArray(parsed.choices) ? parsed.choices[0] : null;
+        const message = choice && choice.message ? choice.message : {};
+        const text = typeof message.content === 'string' ? message.content : '';
+        return {
+            output: [{ type: 'message', content: [{ type: 'output_text', text }] }],
+            usage: parsed.usage
+        };
+    }
+    if (format === 'anthropic') {
+        const blocks = Array.isArray(parsed.content) ? parsed.content : [];
+        const parts = blocks
+            .filter(b => b && b.type === 'text' && typeof b.text === 'string')
+            .map(b => ({ type: 'output_text', text: b.text }));
+        return {
+            output: [{ type: 'message', content: parts }],
+            usage: parsed.usage
+        };
+    }
+    return parsed;
+}
+
+// 转发对话请求到上游模型服务（Responses / OpenAI Chat / Anthropic Messages 三种格式）
 async function handleChat(req, res) {
     if (!API_KEY) return sendJson(res, 503, { error: 'AI 未配置：请设置 TAROT_API_KEY 后重启服务器' });
-    if (!GATEWAY && !TARGET_HOST) return sendJson(res, 503, { error: 'AI 未配置：请设置 TAROT_GATEWAY_HOST 后重启服务器' });
+    if (!PROVIDER) return sendJson(res, 503, { error: 'AI 未配置：请设置 TAROT_API_BASE（或 TAROT_GATEWAY_HOST）后重启服务器' });
     if (!MODEL) return sendJson(res, 503, { error: 'AI 未配置：请设置 TAROT_MODEL 后重启服务器' });
 
     // Host 校验：只接受本机地址，挡住 DNS rebinding 把攻击者域名解析到 127.0.0.1。
@@ -426,26 +572,16 @@ async function handleChat(req, res) {
     let maxTokens = Math.floor(Number(payload.max_output_tokens)) || 4096;
     maxTokens = Math.min(Math.max(maxTokens, 16), 8000);
 
-    const upstreamBody = JSON.stringify({
-        model: MODEL,
-        input: payload.input,
-        max_output_tokens: maxTokens,
-        ...(payload.reasoning && typeof payload.reasoning === 'object' ? { reasoning: payload.reasoning } : {})
-    });
+    const upstreamBody = JSON.stringify(buildUpstreamBody(PROVIDER.format, payload.input, maxTokens, payload.reasoning));
 
-    const gateway = GATEWAY || { protocol: 'https:', host: TARGET_HOST, port: TARGET_PORT, path: '/v1/responses' };
-    const transport = gateway.protocol === 'http:' ? http : https;
+    const transport = PROVIDER.protocol === 'http:' ? http : https;
     const opts = {
-        host: gateway.host,
-        port: gateway.port,
-        path: gateway.path,
+        host: PROVIDER.host,
+        port: PROVIDER.port,
+        path: PROVIDER.path,
         method: 'POST',
-        ...(gateway.protocol === 'https:' ? { agent } : {}),
-        headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${API_KEY}`,
-            'Content-Length': Buffer.byteLength(upstreamBody)
-        },
+        ...(PROVIDER.protocol === 'https:' ? { agent: PROVIDER.pinned ? agent : systemAgent } : {}),
+        headers: upstreamHeaders(PROVIDER.format, upstreamBody),
         timeout: 120000
     };
 
@@ -506,7 +642,7 @@ async function handleChat(req, res) {
                 });
                 return;
             }
-            respond(upRes.statusCode, parsed);
+            respond(upRes.statusCode, normalizeUpstream(PROVIDER.format, parsed));
         });
         // 响应头已发出后上游断开：error/aborted/close 都可能触发，respond 只生效一次。
         upRes.on('error', () => { respond(502, { error: 'upstream_aborted' }); abortUpstream(); });
@@ -557,7 +693,7 @@ async function handleRequest(req, res) {
         if (req.method !== 'GET' && req.method !== 'HEAD') return sendMethodNotAllowed(res, 'GET, HEAD');
         if (!isLocalHost(req.headers.host)) return sendJson(res, 403, { error: 'forbidden host' });
         // 只告知是否已配置，不下发模型名：前端不需要，也不该让页面暴露后端选型。
-        return sendJson(res, 200, { ai: Boolean(API_KEY && MODEL && (GATEWAY || TARGET_HOST)) });
+        return sendJson(res, 200, { ai: Boolean(API_KEY && MODEL && PROVIDER) });
     }
     // 本机用量汇总：只允许本机 Host 读取，返回按天聚合的请求数与本机账本 token 数。
     if (url === '/api/usage') {
@@ -683,17 +819,18 @@ server.on('error', err => {
 server.listen(LISTEN_PORT, '127.0.0.1', () => {
     activePort = server.address().port;
     console.log(`星见塔罗 AI 服务器已启动: http://127.0.0.1:${activePort}`);
-    if (API_KEY && MODEL && (GATEWAY || TARGET_HOST)) {
-        console.log(`AI 已启用：${MODEL} @ ${GATEWAY ? GATEWAY.host : `${TARGET_HOST}:${TARGET_PORT}`}`);
-        // http 网关会把 Bearer 明文发到网络上；只适合本机 mock，生产必须 https。
-        if (GATEWAY && GATEWAY.protocol === 'http:') {
+    if (API_KEY && MODEL && PROVIDER) {
+        console.log(`AI 已启用：${MODEL} · ${PROVIDER.format} · ${PROVIDER.host}:${PROVIDER.port}${PROVIDER.path}`);
+        // http 会把 Bearer 明文发到网络上；只适合本机 mock，生产必须 https。
+        if (PROVIDER.protocol === 'http:') {
             console.warn('');
-            console.warn('⚠️  TAROT_GATEWAY_URL 使用明文 http，Authorization Bearer 会以明文发送。');
+            console.warn('⚠️  上游使用明文 http，Authorization / x-api-key 会以明文发送。');
             console.warn('   仅限本机 mock；生产环境必须使用 https。');
             console.warn('');
         }
         // 只有真要连网关时才提示 TLS 风险；离线模式不产生任何 TLS 连接。
-        if (!gatewayCa && GATEWAY_USES_TLS) {
+        // 第三方服务用公共 CA 签发，不需要网关根证书，所以不提示。
+        if (!gatewayCa && GATEWAY_USES_TLS && PROVIDER.pinned) {
             if (ALLOW_INSECURE_TLS) {
                 console.warn('');
                 console.warn('⚠️  TAROT_ALLOW_INSECURE_TLS=1：TLS 校验已关闭，存在中间人风险。');
@@ -710,7 +847,7 @@ server.listen(LISTEN_PORT, '127.0.0.1', () => {
     } else {
         const missing = [];
         if (!API_KEY) missing.push('TAROT_API_KEY');
-        if (!GATEWAY && !TARGET_HOST) missing.push('TAROT_GATEWAY_HOST');
+        if (!PROVIDER) missing.push('TAROT_API_BASE');
         if (!MODEL) missing.push('TAROT_MODEL');
         console.log(`AI 功能离线：缺少 ${missing.join(' / ')}；页面将自动使用本地解读引擎。`);
         console.log('配置方法：把 .env.example 复制为 .env，填好上述变量后重启。');

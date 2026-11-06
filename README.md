@@ -1,6 +1,6 @@
 # 星见塔罗 (XINGJIAN TAROT)
 
-沉浸式塔罗占卜网页应用。静态页面可完全离线运行；需要 AI 个性化解读时，使用本机 Node 代理连接公司模型网关。
+沉浸式塔罗占卜网页应用。静态页面可完全离线运行；需要 AI 个性化解读时，用一个本机 Node 代理连接**任意一家**模型服务——OpenAI、Claude、DeepSeek、自建网关都行，只要对方提供下面三种接口之一。
 
 > 当前为 **V1.3 第一阶段**：新增 AI 用量本地账本、档案馆「星图洞察」、首屏性能预算与 Web Audio 程序化音效。
 > V1.3.2 修复：真实网关返回 Responses API 风格的 `input_tokens` / `output_tokens` 时，账本分项不再丢失。
@@ -17,35 +17,51 @@
 
 不配置也能用：所有牌阵、本地解读、每日一抽、档案、分享功能完全不受影响，只是报告由本地解读引擎生成。
 
-要接模型，复制 `.env.example` 为 `.env`（已 gitignore，不会进版本库），填好四项：
+要接模型，复制 `.env.example` 为 `.env`（已 gitignore，不会进版本库），按你用的服务商填：
 
 ```bash
 TAROT_API_KEY=sk-...
-TAROT_GATEWAY_HOST=gateway.example.com   # 换成网关运营方给你的地址
-TAROT_GATEWAY_PORT=52000
-TAROT_MODEL=your-model-name
+TAROT_API_BASE=https://api.openai.com/v1     # 换成你的服务商地址
+TAROT_MODEL=gpt-4o-mini                       # 换成你的模型名
+```
+
+Claude（Anthropic）示例：
+
+```bash
+TAROT_API_KEY=sk-ant-...
+TAROT_API_BASE=https://api.anthropic.com/v1
+TAROT_MODEL=claude-sonnet-4-5
 ```
 
 然后 `npm start`，打开 [http://127.0.0.1:8901](http://127.0.0.1:8901)。
 头部显示「AI 星见在线」后，解读报告会由模型实时生成，并可在报告底部继续追问。
 
-也可以临时用环境变量（PowerShell）：
+#### 支持三种接口格式
 
-```powershell
-$env:TAROT_API_KEY="sk-..."; $env:TAROT_GATEWAY_HOST="gateway.example.com"
-$env:TAROT_GATEWAY_PORT="52000"; $env:TAROT_MODEL="your-model-name"; node server.js
-```
+服务端会把页面统一的请求翻译成对应格式，再把响应翻译回来，所以换供应商只改 `.env`，前端一行都不用动。
+
+| `TAROT_API_FORMAT` | 实际请求 | 适用 |
+| --- | --- | --- |
+| `openai`（默认） | `POST {base}/chat/completions` | OpenAI 及所有兼容实现（DeepSeek、Moonshot、通义、vLLM、Ollama、OneAPI 等） |
+| `anthropic` | `POST {base}/messages` | Claude 及兼容代理（自动处理 `system` 分离与 `x-api-key`） |
+| `responses` | `POST {base}/responses` | OpenAI Responses API / 公司网关 |
+
+不写 `TAROT_API_FORMAT` 时按 `TAROT_API_BASE` 猜：地址里含 `anthropic` 或 `claude` 走 Messages，其余按 `openai` 处理。
+`TAROT_API_BASE` 末尾不带路径时自动补 `/v1`。
+
+#### 变量表
 
 | 变量 | 必填 | 说明 |
 | --- | --- | --- |
-| `TAROT_API_KEY` | 是 | AI 接口密钥 |
-| `TAROT_GATEWAY_HOST` | 是 | 网关主机，形如 `gateway.example.com` |
-| `TAROT_GATEWAY_PORT` | 是 | 网关端口，形如 `52000` |
-| `TAROT_MODEL` | 是 | 网关使用的模型标识 |
+| `TAROT_API_KEY` | 是 | 服务商密钥 |
+| `TAROT_API_BASE` | 是 | 接口地址，填到版本号为止，如 `https://api.openai.com/v1` |
+| `TAROT_MODEL` | 是 | 模型标识，如 `gpt-4o-mini`、`claude-sonnet-4-5`、`deepseek-chat` |
+| `TAROT_API_FORMAT` | 否 | `openai` / `anthropic` / `responses`，默认按地址推断 |
 | `PORT` | 否 | 本地监听端口，默认 `8901` |
-| `TAROT_GATEWAY_CA` | 否 | 网关根证书路径，默认 `gateway-ca.crt`（见下节） |
+| `TAROT_GATEWAY_CA` | 否 | 自签网关的根证书路径，默认 `gateway-ca.crt`（见下节） |
+| `TAROT_GATEWAY_HOST` / `TAROT_GATEWAY_PORT` | 否 | 旧写法，等价于 `TAROT_API_BASE=https://<host>:<port>/v1` + `responses` |
 
-四项缺任意一项时，服务器照常启动并打印缺少哪几项，`/api/chat` 返回 503、
+三项必填缺任意一项时，服务器照常启动并打印缺少哪几项，`/api/chat` 返回 503、
 `/api/config` 报 `{"ai":false}`，页面自动回退本地解读引擎，不会打断抽牌流程。
 
 也可以直接用 `npm start`（等价于 `node server.js`）。

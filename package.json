@@ -6,7 +6,7 @@
   "scripts": {
     "start": "node server.js",
     "check": "node --check cards.js && node --check features.js && node --check insights.js && node --check learning.js && node --check audio.js && node --check app.js && node --check server.js && node --check scripts/build-card-assets.cjs && node --check scripts/build-card-deck.cjs",
-    "test": "node --test tests/features.test.cjs tests/insights.test.cjs tests/learning.test.cjs tests/quality.test.cjs tests/assets.test.cjs tests/server.test.cjs tests/server-hardening.test.cjs",
+    "test": "node --test tests/features.test.cjs tests/insights.test.cjs tests/learning.test.cjs tests/quality.test.cjs tests/assets.test.cjs tests/server.test.cjs tests/server-hardening.test.cjs tests/providers.test.cjs",
     "test:browser": "node --test tests/browser.test.cjs"
   },
   "engines": {
