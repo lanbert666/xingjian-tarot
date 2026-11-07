@@ -142,6 +142,19 @@ function cleanText(value, max) {
     return truncateCodePoints(value, max);
 }
 
+// 把 localStorage 写入失败归类为「配额已满 / 存储被禁用 / 其它」，
+// 让界面能给出可操作的不同提示。纯函数：不读 localStorage，也不抛异常。
+function classifyStorageError(err) {
+    if (!err || typeof err !== 'object') return 'other';
+    const name = typeof err.name === 'string' ? err.name : '';
+    const code = err.code;
+    if (name === 'QuotaExceededError' || code === 22 || code === 1014 || code === '22' || code === '1014') {
+        return 'quota';
+    }
+    if (name === 'SecurityError' || name === 'NotSupportedError') return 'unavailable';
+    return 'other';
+}
+
 // 学习页只补充人工维护的象征、误区与观察问题；
 // 牌名与正逆位关键词始终从 cards.js 取，避免两处内容漂移。
 function getLearningEntry(card, extra) {
@@ -246,6 +259,6 @@ function prepareHistoryImport(input) {
 window.TarotFeatures = {
     SPREADS, CATEGORY_NAMES, localDayKey, isValidSpread, selectRecentChatMessages,
     getSafetyRoute, getReviewState, filterHistory, prepareHistoryImport, getLearningEntry,
-    keywordList, CRISIS_PATTERN, HIGH_STAKES_PATTERN, truncateCodePoints
+    keywordList, CRISIS_PATTERN, HIGH_STAKES_PATTERN, truncateCodePoints, classifyStorageError
 };
 })();

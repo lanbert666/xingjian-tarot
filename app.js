@@ -216,7 +216,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const {
         SPREADS, CATEGORY_NAMES, localDayKey, selectRecentChatMessages,
         getSafetyRoute, getReviewState, filterHistory, prepareHistoryImport, getLearningEntry,
-        keywordList, HIGH_STAKES_PATTERN, truncateCodePoints
+        keywordList, HIGH_STAKES_PATTERN, truncateCodePoints, classifyStorageError
     } = window.TarotFeatures;
     const flipTip = document.querySelector('.flip-tip');
     let currentSpread = SPREADS.trinity;
@@ -2600,9 +2600,14 @@ document.addEventListener('DOMContentLoaded', () => {
             localStorage.setItem(HISTORY_KEY, JSON.stringify(merged));
             historyStorageFailed = false;
             return true;
-        } catch {
+        } catch (err) {
             historyStorageFailed = true;
-            showToast('浏览器存储不可用或空间不足，本次修改未能保存。请先导出备份。');
+            const reason = classifyStorageError(err);
+            showToast(reason === 'quota'
+                ? '浏览器存储空间已满，本次修改未能保存。请先导出备份，或清理后重试。'
+                : reason === 'unavailable'
+                    ? '浏览器禁用了本地存储（可能是隐私模式或站点设置），本次修改未能保存。'
+                    : '保存档案时出错，本次修改未能保存。请先导出备份。');
             return false;
         }
     }

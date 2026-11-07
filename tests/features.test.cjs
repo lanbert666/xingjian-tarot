@@ -15,6 +15,7 @@ const {
     SPREADS, localDayKey, isValidSpread, selectRecentChatMessages,
     getSafetyRoute, getReviewState, filterHistory, prepareHistoryImport, truncateCodePoints
 } = sandbox.window.TarotFeatures;
+const { classifyStorageError } = sandbox.window.TarotFeatures;
 
 test('牌库完整且 id 不重复', () => {
     assert.equal(ALL_TAROT_CARDS.length, 78);
@@ -192,4 +193,44 @@ test('高危词表单一来源：app.js 不再维护第二份敏感词表', () =
     const source = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8');
     assert.ok(!/SENSITIVE_WORDS/.test(source), 'app.js 不应再定义 SENSITIVE_WORDS');
     assert.ok(/HIGH_STAKES_PATTERN\.test\(userQuestion\)/.test(source), 'app.js 应引用统一词表');
+});
+
+test('存储错误分类：配额已满', () => {
+    assert.equal(classifyStorageError({ name: 'QuotaExceededError' }), 'quota');
+    assert.equal(classifyStorageError({ code: 22 }), 'quota');
+    assert.equal(classifyStorageError({ code: 1014 }), 'quota');
+});
+
+test('存储错误分类：存储不可用或被禁用', () => {
+    assert.equal(classifyStorageError({ name: 'SecurityError' }), 'unavailable');
+    assert.equal(classifyStorageError({ name: 'NotSupportedError' }), 'unavailable');
+});
+
+test('存储错误分类：其它错误归为 other', () => {
+    assert.equal(classifyStorageError({ name: 'TypeError', message: 'boom' }), 'other');
+    assert.equal(classifyStorageError({ code: 5 }), 'other');
+});
+
+test('存储错误分类：null 与 undefined 不抛异常且归为 other', () => {
+    assert.doesNotThrow(() => classifyStorageError(null));
+    assert.equal(classifyStorageError(null), 'other');
+    assert.doesNotThrow(() => classifyStorageError(undefined));
+    assert.equal(classifyStorageError(undefined), 'other');
+});
+
+test('存储错误分类：普通字符串不抛异常且归为 other', () => {
+    assert.doesNotThrow(() => classifyStorageError('QuotaExceededError'));
+    assert.equal(classifyStorageError('QuotaExceededError'), 'other');
+    assert.equal(classifyStorageError(''), 'other');
+});
+
+test('存储错误分类是纯函数：不读取 localStorage 且重复调用结果稳定', () => {
+    const sandboxWithoutStorage = { window: {} };
+    vm.createContext(sandboxWithoutStorage);
+    vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'features.js'), 'utf8'), sandboxWithoutStorage, { filename: 'features.js' });
+    const isolated = sandboxWithoutStorage.window.TarotFeatures.classifyStorageError;
+    assert.equal(isolated({ name: 'QuotaExceededError' }), 'quota');
+    assert.equal(isolated({ name: 'SecurityError' }), 'unavailable');
+    const sample = { name: 'QuotaExceededError' };
+    assert.equal(classifyStorageError(sample), classifyStorageError(sample));
 });
