@@ -510,10 +510,10 @@ document.addEventListener('DOMContentLoaded', () => {
             to.style.opacity = 1;
             to.style.transform = 'translateY(0)';
 
-            // 只有焦点原本在旧区块里（或已经丢失）时才主动接管，
-            // 避免打断用户已经在新区块里进行的操作。
+            // 只要焦点不在目标区块内（含丢失、停留在页头等区块外按钮）就主动接管，
+            // 避免隐藏视图外残留高亮；焦点已在目标区块内时不抢焦点。
             const active = document.activeElement;
-            if (!active || active === document.body || from.contains(active)) {
+            if (!active || active === document.body || !to.contains(active)) {
                 focusViewHeading(to);
             }
             // 减少动态效果时切换不空等：动画已被禁用，500ms 只是无谓的等待
@@ -3545,7 +3545,6 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('btn-daily-entry').textContent = revealedToday
             ? '回看今日牌 →'
             : drawnToday ? '揭示今日牌 →' : '抽取今日牌 →';
-        document.getElementById('btn-daily').classList.toggle('daily-done', revealedToday);
     }
 
     function openDailyReading() {

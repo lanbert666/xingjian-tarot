@@ -234,3 +234,21 @@ test('存储错误分类是纯函数：不读取 localStorage 且重复调用结
     const sample = { name: 'QuotaExceededError' };
     assert.equal(classifyStorageError(sample), classifyStorageError(sample));
 });
+
+test('主页今日一抽按钮不再保留 daily-done 金色状态标记', () => {
+    const appSource = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8');
+    const styleSource = fs.readFileSync(path.join(__dirname, '..', 'style.css'), 'utf8');
+    assert.ok(!/\bdaily-done\b/.test(appSource), 'app.js 不应再出现 daily-done');
+    assert.ok(!styleSource.includes('.history-btn.daily-done'), 'style.css 不应再保留 .history-btn.daily-done 规则');
+});
+
+test('switchView 只要焦点不在目标区块内就接管焦点', () => {
+    const appSource = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8');
+    assert.ok(!/from\.contains\(active\)/.test(appSource), 'switchView 不应再使用 from.contains(active)');
+    assert.match(appSource, /if \(!active \|\| active === document\.body \|\| !to\.contains\(active\)\) \{\s*focusViewHeading\(to\);/);
+});
+
+test('主页今日一抽入口的金色文案样式仍然保留', () => {
+    const styleSource = fs.readFileSync(path.join(__dirname, '..', 'style.css'), 'utf8');
+    assert.match(styleSource, /#btn-daily-entry \{[^}]*color:\s*var\(--gold-light\);/);
+});

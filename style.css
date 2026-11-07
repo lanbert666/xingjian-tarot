@@ -1942,11 +1942,6 @@ body {
     color: var(--gold-light);
 }
 
-.history-btn.daily-done {
-    color: var(--gold-light);
-    border-color: var(--gold-dark);
-}
-
 .slots-container.many {
     display: grid;
     grid-template-columns: repeat(5, minmax(0, 1fr));
