@@ -184,6 +184,24 @@ async function recordOneUsage(body) {
     }
 }
 
+// 与 recordOneUsage 相同，但允许「上游 200 却不写账本行」，返回全部账本行。
+async function recordUsageRows(body) {
+    clearUsageLog();
+    const upstream = await startJsonMock(body);
+    const server = await startServer({
+        TAROT_API_KEY: 'sk-test-fake',
+        TAROT_GATEWAY_URL: `http://127.0.0.1:${upstream.address().port}/v1/responses`
+    });
+    try {
+        const res = await postChat(server.port);
+        assert.equal(res.status, 200, `应 200，实际 ${res.status}: ${res.body}`);
+        return readUsageLines();
+    } finally {
+        server.stop();
+        await new Promise(resolve => upstream.close(resolve));
+    }
+}
+
 function getJson(port, pathname) {
     return new Promise((resolve, reject) => {
         const req = http.request({ host: '127.0.0.1', port, path: pathname, method: 'GET' }, res => {
@@ -380,23 +398,20 @@ test('用量账本：缺 total_tokens 时总数记为两个分项之和', async 
 });
 
 test('用量账本：usage 缺失或字段非数字记 null 且响应不中断', async () => {
-    const missing = await recordOneUsage({ output: [] });
-    assert.equal(missing.prompt_tokens, null);
-    assert.equal(missing.completion_tokens, null);
-    assert.equal(missing.total_tokens, null);
+    const missing = await recordUsageRows({ output: [] });
+    assert.equal(missing.length, 0, '无 usage 时不写空账本行，requests 不应增加');
 
-    const nonNumeric = await recordOneUsage({
+    const nonNumeric = await recordUsageRows({
         output: [],
         usage: { input_tokens: 'abc', output_tokens: null, total_tokens: 'x' }
     });
-    assert.equal(nonNumeric.prompt_tokens, null);
-    assert.equal(nonNumeric.completion_tokens, null);
-    assert.equal(nonNumeric.total_tokens, null);
+    assert.equal(nonNumeric.length, 0, '字段全非数字时同样不写空账本行');
 
-    const partial = await recordOneUsage({ output: [], usage: { prompt_tokens: 7 } });
-    assert.equal(partial.prompt_tokens, 7);
-    assert.equal(partial.completion_tokens, null);
-    assert.equal(partial.total_tokens, null, '只有一个分项时不应臆造总数');
+    const partial = await recordUsageRows({ output: [], usage: { prompt_tokens: 7 } });
+    assert.equal(partial.length, 1, '至少有一个有效分项时仍应记账');
+    assert.equal(partial[0].prompt_tokens, 7);
+    assert.equal(partial[0].completion_tokens, null);
+    assert.equal(partial[0].total_tokens, null, '只有一个分项时不应臆造总数');
 });
 
 test('/api/usage 兼容旧账本行：null 分项不报错，缺 total 时按分项之和聚合', async () => {

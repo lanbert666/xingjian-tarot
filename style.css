@@ -1103,6 +1103,18 @@ body {
     vertical-align: middle;
 }
 
+/* 截断提示：浅黄底深色字，左侧强调条；.hidden 的 display:none !important 仍优先。 */
+.report-notice {
+    margin: 0.75rem 0 0;
+    padding: 0.65rem 0.9rem;
+    border-left: 3px solid var(--gold);
+    border-radius: 4px;
+    background: #fdf6dd;
+    color: #4a3a12;
+    font-size: 0.85rem;
+    line-height: 1.6;
+}
+
 /* 长报告导航：位置目录、复盘直达与回到顶部 */
 .report-nav {
     display: flex;
@@ -2210,6 +2222,9 @@ body {
     font-size: 11px;
     line-height: 1.75;
     text-align: justify;
+    /* 超长无空格文本（链接、连续英文）不能横向溢出被裁掉 */
+    word-break: break-word;
+    overflow-wrap: anywhere;
 }
 
 .share-mini-cards.many + .share-insight {
@@ -2225,6 +2240,8 @@ body {
     color: var(--gold-light);
     font-size: 10px;
     line-height: 1.65;
+    word-break: break-word;
+    overflow-wrap: anywhere;
 }
 
 .share-bottom {
@@ -2874,4 +2891,190 @@ input::placeholder, textarea::placeholder { color: rgba(232, 226, 255, 0.66); op
     .learning-filter { padding: 3px 8px; font-size: 0.75rem; }
     .learning-count { font-size: 0.75rem; }
     .learning-list { min-height: 140px; }
+}
+
+/* ==========================================================================
+   打印样式：纸上没有星空背景，也没有鼠标。
+   目标：白底深字（对比度 ≥ 4.5:1）、隐藏交互控件、完整打印对话与阅读块。
+   ========================================================================== */
+@media print {
+    @page { margin: 12mm; }
+
+    html,
+    body {
+        background: #fff !important;
+        color: #1a1625 !important;
+    }
+
+    /* 装饰层在纸上只会变成整页近黑，直接移除 */
+    #starfield,
+    .cosmic-glow,
+    #particle-layer,
+    .skip-link,
+    #toast {
+        display: none !important;
+    }
+
+    /* 吸顶/固定元素在分页时会重复出现并盖住正文 */
+    .reveal-topbar,
+    .report-header {
+        position: static !important;
+        top: auto !important;
+        background: #fff !important;
+        border: none !important;
+        box-shadow: none !important;
+    }
+
+    /* 交互控件不进入纸面 */
+    .app-header,
+    footer,
+    .report-nav,
+    #ai-progress,
+    .quick-tags,
+    .spread-options,
+    .step-nav,
+    .report-actions,
+    .history-panel,
+    .learning-panel,
+    .share-panel,
+    .safety-panel,
+    button,
+    input,
+    textarea,
+    select {
+        display: none !important;
+    }
+
+    /* 深色容器统一改白底，避免整页墨块 */
+    .console-box,
+    .glass-panel,
+    .step-section,
+    .reading-report,
+    .reading-block,
+    .highlight-block,
+    .blessing-block,
+    .ai-chat-messages,
+    .ai-chat-msg,
+    main,
+    section,
+    article {
+        background: #fff !important;
+        box-shadow: none !important;
+    }
+
+    /* 正文与次级文字统一压深：原来的 #a2a2a5 / #9c98ab 在白底只有 2.5:1 */
+    body,
+    p,
+    span,
+    li,
+    div,
+    section,
+    article,
+    h1,
+    h2,
+    h3,
+    h4,
+    h5,
+    h6,
+    .reading-block,
+    .reading-block *,
+    .reading-basis,
+    .reading-basis *,
+    .highlight-block,
+    .highlight-block *,
+    .blessing-block,
+    .blessing-block *,
+    .ai-chat-messages,
+    .ai-chat-messages * {
+        color: #1a1625 !important;
+    }
+
+    a {
+        color: #1a1625 !important;
+        text-decoration: underline;
+    }
+
+    .reading-block {
+        border: 1px solid #d8d2e4 !important;
+        border-left: 3px solid #5b3d99 !important;
+        padding: 1rem 1.1rem !important;
+    }
+
+    .report-notice {
+        background: #fff !important;
+        color: #1a1625 !important;
+        border: 1px solid #d8d2e4 !important;
+        border-left: 3px solid #5b3d99 !important;
+    }
+
+    /* 阅读块与卡牌不跨页切断 */
+    .reading-block,
+    .highlight-block,
+    .blessing-block,
+    .report-divider,
+    .tarot-card-3d,
+    .card-display-item {
+        break-inside: avoid;
+        page-break-inside: avoid;
+    }
+
+    /* 卡面插图是内容，需要保留颜色；只对插图开启精确打印。
+       .card-front 本身不再精确打印：用户关闭「背景图形」时深底不会落纸，
+       浅色卡名会落在白纸上；这里统一改白底深字，两种情况都可读。 */
+    .card-art,
+    .card-art *,
+    .card-art-frame {
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+    }
+
+    .card-front {
+        background: #fff !important;
+        border: 1px solid #d8d2e4 !important;
+        box-shadow: none !important;
+    }
+
+    /* 卡面底部的深色渐变压在牌名下面，打印时去掉，避免深字压深底。 */
+    .card-art-frame::after {
+        display: none !important;
+    }
+
+    .card-name-cn,
+    .card-name-en,
+    .card-orientation {
+        color: #1a1625 !important;
+        background: #fff !important;
+        text-shadow: none !important;
+    }
+
+    .card-orientation {
+        border: 1px solid #b9b2c9 !important;
+    }
+
+    /* 屏幕上的 380px 滚动窗口会把后续对话截掉，打印时必须完整展开 */
+    #ai-chat-messages {
+        max-height: none !important;
+        height: auto !important;
+        overflow: visible !important;
+    }
+
+    #ai-chat-block {
+        break-inside: auto;
+    }
+}
+
+/* ==========================================================================
+   强制颜色模式（Windows 高对比度）：选中态不能只靠背景透明度。
+   ========================================================================== */
+@media (forced-colors: active) {
+    .spread-option.selected,
+    .learning-filter.active,
+    .quality-feedback button.active {
+        outline: 3px solid Highlight;
+        outline-offset: 2px;
+        border-color: Highlight;
+        forced-color-adjust: none;
+        color: HighlightText;
+        background: Highlight;
+    }
 }

@@ -405,6 +405,9 @@ function rotateUsageLogIfNeeded() {
 
 function recordUsage(payload) {
     const usage = parseUsage(payload);
+    // 上游 200 但没有任何 token 字段（例如空响应/代理错误页）时不写空账本行，
+    // 否则 /api/usage 的 requests 会把没有实际消耗的请求也算进去。
+    if (usage.prompt_tokens === null && usage.completion_tokens === null && usage.total_tokens === null) return;
     const line = JSON.stringify({ ts: new Date().toISOString(), ...usage });
     rotateUsageLogIfNeeded();
     try {
@@ -512,15 +515,26 @@ function upstreamHeaders(format, bodyText) {
 
 // 把上游响应翻译回 Responses 形状：output[].content[].{ type: 'output_text', text }。
 // 前端只认这一种，翻译放在服务端，换供应商时页面无需感知。
+// 截断/拒答是三种格式各说各话的信号，统一成顶层 truncated / truncatedReason / refusal，
+// 前端只读这一组字段。字段只在命中时出现，保持旧响应形状兼容。
 function normalizeUpstream(format, parsed) {
     if (format === 'openai') {
         const choice = Array.isArray(parsed.choices) ? parsed.choices[0] : null;
         const message = choice && choice.message ? choice.message : {};
         const text = typeof message.content === 'string' ? message.content : '';
-        return {
+        const result = {
             output: [{ type: 'message', content: [{ type: 'output_text', text }] }],
             usage: parsed.usage
         };
+        if (choice && choice.finish_reason === 'length') {
+            result.truncated = true;
+            result.truncatedReason = 'length';
+        }
+        if (typeof message.refusal === 'string' && message.refusal.trim()) {
+            result.refusal = true;
+            result.refusalReason = message.refusal.trim().slice(0, 200);
+        }
+        return result;
     }
     if (format === 'anthropic') {
         const blocks = Array.isArray(parsed.content) ? parsed.content : [];
@@ -534,12 +548,44 @@ function normalizeUpstream(format, parsed) {
             const cached = Number(usage.cache_creation_input_tokens || 0) + Number(usage.cache_read_input_tokens || 0);
             if (cached > 0) usage.input_tokens = Number(usage.input_tokens || 0) + cached;
         }
-        return {
+        const result = {
             output: [{ type: 'message', content: parts }],
             usage
         };
+        if (parsed.stop_reason === 'max_tokens') {
+            result.truncated = true;
+            result.truncatedReason = 'max_tokens';
+        }
+        if (parsed.stop_reason === 'refusal') {
+            result.refusal = true;
+            result.refusalReason = 'refusal';
+        }
+        return result;
     }
-    return parsed;
+    // Responses 格式本就透传，这里只补统一信号，不改 output 结构。
+    const result = { ...parsed };
+    if (parsed && parsed.status === 'incomplete') {
+        result.truncated = true;
+        result.truncatedReason = (parsed.incomplete_details && parsed.incomplete_details.reason) || 'incomplete';
+    }
+    if (Array.isArray(parsed && parsed.output)) {
+        const refused = parsed.output.some(item => Array.isArray(item && item.content)
+            && item.content.some(part => part && part.type === 'refusal'));
+        if (refused) {
+            result.refusal = true;
+            result.refusalReason = 'refusal';
+        }
+    }
+    return result;
+}
+
+// 上游状态码翻译成人话，但不回显上游原文（可能带内部地址、堆栈或凭据片段）。
+function upstreamErrorMessage(status) {
+    if (status === 401 || status === 403) return 'API Key 无效或没有权限';
+    if (status === 404) return '接口地址不对，请检查 TAROT_API_BASE';
+    if (status === 429) return '请求过于频繁，请稍后重试';
+    if (status >= 500) return '模型服务暂时不可用';
+    return 'AI 网关暂时不可用';
 }
 
 // 转发对话请求到上游模型服务（Responses / OpenAI Chat / Anthropic Messages 三种格式）
@@ -604,7 +650,9 @@ async function handleChat(req, res) {
         method: 'POST',
         ...(PROVIDER.protocol === 'https:' ? { agent: PROVIDER.pinned ? agent : systemAgent } : {}),
         headers: upstreamHeaders(PROVIDER.format, upstreamBody),
-        timeout: 120000
+        // 客户端按输出预算动态放宽超时（6500 token 的凯尔特十字可达 260 秒），
+        // 服务端必须比客户端更宽，否则前端还没超时、网关先被掐断。
+        timeout: 300000
     };
 
     // 任何路径（正常、上游中断、客户端中断、超时）都只响应一次；客户端已断开时不再写响应。
@@ -653,19 +701,22 @@ async function handleChat(req, res) {
             if (clientGone || res.destroyed) return;
             // 先归一化再记账：Anthropic 的缓存命中量要加回输入侧，账本才与真实用量一致。
             const normalized = normalizeUpstream(PROVIDER.format, parsed);
-            recordUsage(normalized);
             // 非 2xx 一律返回通用错误；上游状态码/错误体只写服务端日志，
             // 避免把内部地址、堆栈或凭据片段透传给浏览器。排查时用 TAROT_DEBUG=1。
             if (upRes.statusCode < 200 || upRes.statusCode >= 300) {
+                // 失败请求没有可信 usage，不写账本行（否则 requests 会把重试也算成消耗）。
                 console.error(`网关返回 ${upRes.statusCode}：`, text.slice(0, 500));
+                const retryAfter = upRes.headers['retry-after'];
+                if (retryAfter) res.setHeader('Retry-After', String(retryAfter));
                 respond(502, {
                     error: 'AI 网关暂时不可用',
-                    ...(process.env.TAROT_DEBUG === '1'
-                        ? { upstream_status: upRes.statusCode, upstream: text.slice(0, 500) }
-                        : {})
+                    message: upstreamErrorMessage(upRes.statusCode),
+                    upstream_status: upRes.statusCode,
+                    ...(process.env.TAROT_DEBUG === '1' ? { upstream: text.slice(0, 500) } : {})
                 });
                 return;
             }
+            recordUsage(normalized);
             respond(upRes.statusCode, normalized);
         });
         // 响应头已发出后上游断开：error/aborted/close 都可能触发，respond 只生效一次。
@@ -678,7 +729,8 @@ async function handleChat(req, res) {
             }
         });
         // 响应体迟迟不结束的兜底（请求级 timeout 只覆盖到响应头）。
-        upRes.setTimeout(120000, () => { respond(504, { error: '网关响应超时' }); abortUpstream(); });
+        // 必须大于前端按 max_tokens 计算出的预算（凯尔特 260s），否则长解读会被网关先掐断。
+        upRes.setTimeout(300000, () => { respond(504, { error: '网关响应超时' }); abortUpstream(); });
     });
     activeUpstreams.add(up);
     up.on('close', () => activeUpstreams.delete(up));

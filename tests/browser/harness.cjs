@@ -82,6 +82,14 @@ function mockAiText(long = false) {
     return sections.join('\n');
 }
 
+function upstreamErrorMessage(status) {
+    if (status === 401 || status === 403) return 'API Key 无效或没有权限';
+    if (status === 404) return '接口地址不对，请检查 TAROT_API_BASE';
+    if (status === 429) return '请求过于频繁，请稍后重试';
+    if (status >= 500) return '模型服务暂时不可用';
+    return 'AI 网关暂时不可用';
+}
+
 async function startMockServer() {
     const state = {
         aiAvailable: false,
@@ -94,7 +102,10 @@ async function startMockServer() {
         lastChatBody: null,
         usage: {},
         delayMs: 0,
-        aiText: null
+        aiText: null,
+        truncated: false,
+        truncatedReason: null,
+        refusal: false
     };
 
     const server = http.createServer(async (req, res) => {
@@ -120,12 +131,24 @@ async function startMockServer() {
                 state.failNext--;
                 const headers = {};
                 if (state.retryAfter > 0) headers['Retry-After'] = String(state.retryAfter);
-                return sendJson(res, state.failStatus || 502, { error: 'E2E 固定失败一次' }, headers);
+                // 与真实 server 的 handleChat 对齐：502 信封 + 具体中文 message + upstream_status。
+                return sendJson(res, state.failStatus || 502, {
+                    error: 'AI 网关暂时不可用',
+                    message: upstreamErrorMessage(state.failStatus || 502),
+                    upstream_status: state.failStatus || 502
+                }, headers);
             }
             if (state.delayMs > 0) await new Promise(resolve => setTimeout(resolve, state.delayMs));
-            return sendJson(res, 200, {
+            const payload = {
                 output: [{ type: 'message', content: [{ type: 'output_text', text: state.aiText || mockAiText(state.longAi) }] }]
-            });
+            };
+            // 与真实 server 的 normalizeUpstream 对齐：截断/拒答字段放在顶层。
+            if (state.truncated) {
+                payload.truncated = true;
+                payload.truncatedReason = state.truncatedReason || 'length';
+            }
+            if (state.refusal) payload.refusal = true;
+            return sendJson(res, 200, payload);
         }
 
         if (pathname === '/__test/reset') {
@@ -136,6 +159,9 @@ async function startMockServer() {
             state.configCalls = 0;
             state.lastChatBody = null;
             state.usage = {};
+            state.truncated = false;
+            state.truncatedReason = null;
+            state.refusal = false;
             return sendJson(res, 200, { ok: true });
         }
 
@@ -200,6 +226,9 @@ async function startMockServer() {
             state.usage = options.usage && typeof options.usage === 'object' ? options.usage : {};
             state.delayMs = Number(options.delayMs) || 0;
             state.aiText = typeof options.aiText === 'string' ? options.aiText : null;
+            state.truncated = Boolean(options.truncated);
+            state.truncatedReason = typeof options.truncatedReason === 'string' ? options.truncatedReason : null;
+            state.refusal = Boolean(options.refusal);
         },
         async close() {
             await new Promise(resolve => server.close(resolve));
@@ -281,10 +310,10 @@ class CDP {
     }
 }
 
-function buildInitScript({ seedStorage = {}, fixedNow = FIXED_NOW }) {
+function buildInitScript({ seedStorage = {}, fixedNow = FIXED_NOW, seed = true }) {
     const storage = JSON.stringify(seedStorage);
     return `(() => {
-        const FIXED_NOW = ${fixedNow};
+        let FIXED_NOW = ${fixedNow};
         const RealDate = Date;
         class E2EDate extends RealDate {
             constructor(...args) {
@@ -304,6 +333,15 @@ function buildInitScript({ seedStorage = {}, fixedNow = FIXED_NOW }) {
         };
 
         window.__e2e = { fixedNow: FIXED_NOW, downloads: [], lastBlob: null };
+        // 允许测试把页面时钟拨过零点，验证跨日文案与档案归属。
+        window.__e2e.setNow = function (timestamp) {
+            const next = Number(timestamp);
+            if (Number.isFinite(next)) {
+                FIXED_NOW = next;
+                window.__e2e.fixedNow = next;
+            }
+            return FIXED_NOW;
+        };
         const originalCreateObjectURL = URL.createObjectURL.bind(URL);
         URL.createObjectURL = function (blob) {
             window.__e2e.lastBlob = blob;
@@ -319,7 +357,7 @@ function buildInitScript({ seedStorage = {}, fixedNow = FIXED_NOW }) {
         };
 
         try {
-            if (!sessionStorage.getItem('__e2e_seeded')) {
+            if (${seed} && !sessionStorage.getItem('__e2e_seeded')) {
                 localStorage.clear();
                 const seedStorage = ${storage};
                 for (const [key, value] of Object.entries(seedStorage)) {
@@ -437,7 +475,13 @@ class Page {
         return this.browser.send(method, params, this.sessionId);
     }
 
-    async init({ width = 1280, height = 900, mobile = false, reduceMotion = false, seedStorage = {}, extraInit = '', blockUrls = [] } = {}) {
+    // 多标签页用例里，后创建的页面会成为前台标签页；被切到后台的页面 rAF 会暂停，
+    // 依赖 requestAnimationFrame 的点击稳定性检测就会一直等下去。交互前显式切回前台。
+    async activate() {
+        await this.browser.send('Target.activateTarget', { targetId: this.targetId });
+    }
+
+    async init({ width = 1280, height = 900, mobile = false, reduceMotion = false, seedStorage = {}, seed = true, extraInit = '', blockUrls = [] } = {}) {
         await this.send('Page.enable');
         await this.send('Runtime.enable');
         await this.send('Log.enable');
@@ -457,7 +501,7 @@ class Page {
                 ...blockUrls
             ]
         });
-        const source = buildInitScript({ seedStorage }) + (extraInit ? `\n${extraInit}` : '');
+        const source = buildInitScript({ seedStorage, seed }) + (extraInit ? `\n${extraInit}` : '');
         await this.send('Page.addScriptToEvaluateOnNewDocument', { source });
     }
 
@@ -514,7 +558,13 @@ class Page {
             el.scrollIntoView({ block: 'center', inline: 'center' });
             // 等位置稳定：scrollIntoView 与视图过渡/入场动画都可能让元素继续移动，
             // 只等固定两帧仍可能把鼠标事件派发到移动前的坐标上（粘性顶栏尤其明显）。
-            const frame = () => new Promise(resolve => requestAnimationFrame(resolve));
+            // 后台标签页会暂停 rAF；加一个定时器兜底，避免点击在隐藏页里永久挂起。
+            const frame = () => new Promise(resolve => {
+                let settled = false;
+                const finish = () => { if (!settled) { settled = true; resolve(); } };
+                requestAnimationFrame(finish);
+                setTimeout(finish, 120);
+            });
             let rect = el.getBoundingClientRect();
             let lastSignature = '';
             let stableFrames = 0;
@@ -617,6 +667,14 @@ class Page {
     async setViewport(width, height, mobile = false) {
         await this.send('Emulation.setDeviceMetricsOverride', {
             width, height, deviceScaleFactor: 1, mobile
+        });
+    }
+
+    // 打印/高对比度回归用：切换 media 类型或 prefers-* / forced-colors 特性。
+    async emulateMedia({ media = '', features = [] } = {}) {
+        await this.send('Emulation.setEmulatedMedia', {
+            media,
+            features: features.map(feature => ({ name: feature.name, value: feature.value }))
         });
     }
 

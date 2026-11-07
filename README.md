@@ -2,7 +2,8 @@
 
 沉浸式塔罗占卜网页应用。静态页面可完全离线运行；需要 AI 个性化解读时，用一个本机 Node 代理连接**任意一家**模型服务——OpenAI、Claude、DeepSeek、自建网关都行，只要对方提供下面三种接口之一。
 
-> 当前为 **V1.3 第一阶段**：新增 AI 用量本地账本、档案馆「星图洞察」、首屏性能预算与 Web Audio 程序化音效。
+> 当前为 **V1.4**：多服务商（OpenAI / Anthropic / Responses 三种格式）真实行为适配、截断与拒答处理、
+> 上游错误分类与认证状态提示、档案并发合并、每日一抽跨零点归属、打印/高对比度/读屏计数适配。
 > V1.3.2 修复：真实网关返回 Responses API 风格的 `input_tokens` / `output_tokens` 时，账本分项不再丢失。
 > V1.2 的牌义学习、报告“解读依据”、长报告导航、键盘/焦点/减少动态效果、确定性浏览器回归和 78 张原创牌面（AI 生成，逐张人工验收）均保留。详见 [`SECOND_STAGE_ACCEPTANCE.md`](SECOND_STAGE_ACCEPTANCE.md)。
 
@@ -61,12 +62,21 @@ TAROT_MODEL=claude-sonnet-4-5
 | `TAROT_MODEL` | 是 | 模型标识，如 `gpt-4o-mini`、`claude-sonnet-4-5`、`deepseek-chat` |
 | `TAROT_API_FORMAT` | 否 | `openai` / `anthropic` / `responses`，默认按地址推断 |
 | `TAROT_MAX_TOKENS_PARAM` | 否 | OpenAI 格式下输出上限的字段名，默认 `max_tokens`；o 系列 / gpt-5 等新模型填 `max_completion_tokens` |
-| `PORT` | 否 | 本地监听端口，默认 `8901` |
 | `TAROT_GATEWAY_CA` | 否 | 自签证书的根证书路径，默认 `gateway-ca.crt`（见下节） |
-| `TAROT_GATEWAY_HOST` / `TAROT_GATEWAY_PORT` | 否 | 旧写法，等价于 `TAROT_API_BASE=https://<host>:<port>/v1` + `responses` |
+| `PORT` | 否 | 本地监听端口，默认 `8901` |
+| `TAROT_USAGE_LOG` | 否 | AI 用量账本路径，默认项目根目录的 `usage-log.jsonl` |
 
-三项必填缺任意一项时，服务器照常启动并打印缺少哪几项，`/api/chat` 返回 503、
+表中变量与 [`.env.example`](.env.example) 一一对应；三项必填缺任意一项时，服务器照常启动并打印缺少哪几项，`/api/chat` 返回 503、
 `/api/config` 报 `{"ai":false}`，页面自动回退本地解读引擎，不会打断抽牌流程。
+
+兼容/调试用的变量不写进 `.env.example`，需要时手动加到 `.env`：
+
+| 变量 | 说明 |
+| --- | --- |
+| `TAROT_GATEWAY_HOST` / `TAROT_GATEWAY_PORT` | 旧写法，等价于 `TAROT_API_BASE=https://<host>:<port>/v1` + `responses` |
+| `TAROT_GATEWAY_URL` | 旧写法，直接指定完整上游 URL（仅建议本机 mock 使用） |
+| `TAROT_ALLOW_INSECURE_TLS` | 设为 `1` 才关闭 TLS 校验，仅限临时调试，启动会打印醒目警告 |
+| `TAROT_DEBUG` | 设为 `1` 时，502 响应附带截断后的上游原文，便于排查服务商差异 |
 
 也可以直接用 `npm start`（等价于 `node server.js`）。
 
@@ -206,6 +216,7 @@ tests/reading-quality-cases.json  AI 解读质量与安全评审用例
 PRODUCT_PLAN.md             三阶段产品演进规划
 QUALITY_REVIEW.md           AI 解读质量评审维度与方法
 SECOND_STAGE_ACCEPTANCE.md  第二阶段验收记录、已知限制与阻塞项
+LICENSE                     MIT 许可证
 ```
 
 脚本加载顺序：渲染库 → 卡牌数据 → 牌阵配置 → 星图洞察 → 学习内容 → 牌面清单 → 音效 → 应用逻辑。
@@ -260,6 +271,20 @@ JSONL 追加、按本地自然日聚合、坏行跳过与非本机 Host 拒绝�
   页面加载阶段不创建，避免自动播放策略警告。`prefers-reduced-motion: reduce` 时默认静音并在按钮提示原因。
 - 首屏性能预算：不请求任何 `assets/cards/webp/` 牌面，传输体积 < 500KB，DOMContentLoaded < 1s；
   `file://` 下 Resource Timing 可能为空，只校验请求次数与牌面请求。
+
+## 已知限制
+
+- 本轮真实端点验证覆盖 Kimi Coding 网关（Responses / OpenAI / Anthropic 三种格式均返回 200）；
+  OpenAI、Anthropic、DeepSeek 官方端点尚未逐一实测，格式兼容性依据协议文档与本地 mock 回归。
+- 真实服务商的 429、5xx、超时、连接重置与非 JSON 响应未逐一复现；错误分类、`Retry-After` 转发与
+  `TAROT_DEBUG` 行为由本地 mock 覆盖。
+- 截断与拒答处理是尽力而为：OpenAI / Anthropic 的结构化字段优先，Kimi 等纯文本拒答按
+  「无分段标记且正文过短」启发式识别；无任何分段标记的长文本回退本地解读（若同时被截断，
+  优先提示截断），不冒充 AI 解读，不保证覆盖所有服务商的措辞。
+- Safari / iOS 未实测；`Intl.Segmenter` 不可用时使用保守的字素回退切分。
+- 真实读屏器（NVDA / VoiceOver）与真实打印机未实测；打印样式基于 headless Chrome 导出的 PDF 做像素与分页分析，
+  高对比度基于 `forced-colors: active` 模拟。
+- 档案并发采用「按 id 合并、先落盘者胜」策略，极端同时写入仍可能让某一方的连续编辑丢失最后一次修改。
 
 ## 免责声明
 

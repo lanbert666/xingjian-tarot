@@ -31,7 +31,7 @@ function startMock(reply) {
                 const body = Buffer.concat(chunks).toString('utf8');
                 seen.push({ url: req.url, headers: req.headers, body });
                 const out = reply(req, body);
-                res.writeHead(out.status || 200, { 'Content-Type': 'application/json' });
+                res.writeHead(out.status || 200, { 'Content-Type': 'application/json', ...(out.headers || {}) });
                 res.end(JSON.stringify(out.body));
             });
         });
@@ -93,7 +93,7 @@ function postChat(port, body = CHAT_BODY) {
         }, res => {
             const chunks = [];
             res.on('data', c => chunks.push(c));
-            res.on('end', () => resolve({ status: res.statusCode, json: JSON.parse(Buffer.concat(chunks).toString('utf8')) }));
+            res.on('end', () => resolve({ status: res.statusCode, headers: res.headers, json: JSON.parse(Buffer.concat(chunks).toString('utf8')) }));
         });
         req.on('error', reject);
         req.write(body);
@@ -315,6 +315,208 @@ test('上游返回非 2xx 时仍然是通用错误，不透传原文', async () 
         assert.equal(res.status, 502);
         assert.equal(res.json.error, 'AI 网关暂时不可用');
         assert.equal(JSON.stringify(res.json).includes('upstream.example.internal'), false, '不应回显上游原文');
+    } finally {
+        srv.stop();
+        await new Promise(r => mock.server.close(r));
+    }
+});
+
+test('openai finish_reason=length 统一透传为 truncated', async () => {
+    const mock = await startMock(() => ({
+        body: {
+            choices: [{ message: { role: 'assistant', content: '【牌1】\n半句' }, finish_reason: 'length' }],
+            usage: { prompt_tokens: 10, completion_tokens: 8 }
+        }
+    }));
+    const srv = await startServer({
+        TAROT_API_BASE: `http://127.0.0.1:${mock.port}/v1`,
+        TAROT_API_FORMAT: 'openai'
+    });
+    try {
+        const res = await postChat(srv.port);
+        assert.equal(res.status, 200);
+        assert.equal(res.json.truncated, true);
+        assert.equal(res.json.truncatedReason, 'length');
+        assert.equal(res.json.output[0].content[0].text.includes('半句'), true, '截断正文仍要返回，由前端决定怎么用');
+    } finally {
+        srv.stop();
+        await new Promise(r => mock.server.close(r));
+    }
+});
+
+test('anthropic stop_reason=max_tokens 统一透传为 truncated', async () => {
+    const mock = await startMock(() => ({
+        body: {
+            content: [{ type: 'text', text: '【牌1】\n半句' }],
+            stop_reason: 'max_tokens',
+            usage: { input_tokens: 10, output_tokens: 8 }
+        }
+    }));
+    const srv = await startServer({
+        TAROT_API_BASE: `http://127.0.0.1:${mock.port}/v1`,
+        TAROT_API_FORMAT: 'anthropic'
+    });
+    try {
+        const res = await postChat(srv.port);
+        assert.equal(res.status, 200);
+        assert.equal(res.json.truncated, true);
+        assert.equal(res.json.truncatedReason, 'max_tokens');
+    } finally {
+        srv.stop();
+        await new Promise(r => mock.server.close(r));
+    }
+});
+
+test('responses 的 incomplete 状态统一透传为 truncated', async () => {
+    const mock = await startMock(() => ({
+        body: {
+            status: 'incomplete',
+            incomplete_details: { reason: 'max_output_tokens' },
+            output: [{ type: 'message', content: [{ type: 'output_text', text: '【牌1】\n半句' }] }],
+            usage: { input_tokens: 10, output_tokens: 8 }
+        }
+    }));
+    const srv = await startServer({
+        TAROT_API_BASE: `http://127.0.0.1:${mock.port}/v1`,
+        TAROT_API_FORMAT: 'responses'
+    });
+    try {
+        const res = await postChat(srv.port);
+        assert.equal(res.status, 200);
+        assert.equal(res.json.truncated, true);
+        assert.equal(res.json.truncatedReason, 'max_output_tokens');
+    } finally {
+        srv.stop();
+        await new Promise(r => mock.server.close(r));
+    }
+});
+
+test('openai message.refusal 统一透传为 refusal', async () => {
+    const mock = await startMock(() => ({
+        body: {
+            choices: [{ message: { role: 'assistant', content: '', refusal: 'I cannot help with that.' }, finish_reason: 'stop' }],
+            usage: { prompt_tokens: 10, completion_tokens: 4 }
+        }
+    }));
+    const srv = await startServer({
+        TAROT_API_BASE: `http://127.0.0.1:${mock.port}/v1`,
+        TAROT_API_FORMAT: 'openai'
+    });
+    try {
+        const res = await postChat(srv.port);
+        assert.equal(res.status, 200);
+        assert.equal(res.json.refusal, true);
+    } finally {
+        srv.stop();
+        await new Promise(r => mock.server.close(r));
+    }
+});
+
+test('上游 401 映射为认证失败文案，同时保留通用错误外壳', async () => {
+    const mock = await startMock(() => ({ status: 401, body: { error: { message: 'bad key' } } }));
+    const srv = await startServer({
+        TAROT_API_BASE: `http://127.0.0.1:${mock.port}/v1`,
+        TAROT_API_FORMAT: 'openai'
+    });
+    try {
+        const res = await postChat(srv.port);
+        assert.equal(res.status, 502);
+        assert.equal(res.json.error, 'AI 网关暂时不可用');
+        assert.equal(res.json.message, 'API Key 无效或没有权限');
+        assert.equal(res.json.upstream_status, 401);
+    } finally {
+        srv.stop();
+        await new Promise(r => mock.server.close(r));
+    }
+});
+
+test('上游 404 映射为接口地址错误文案', async () => {
+    const mock = await startMock(() => ({ status: 404, body: { error: 'not found' } }));
+    const srv = await startServer({
+        TAROT_API_BASE: `http://127.0.0.1:${mock.port}/v1`,
+        TAROT_API_FORMAT: 'openai'
+    });
+    try {
+        const res = await postChat(srv.port);
+        assert.equal(res.json.message, '接口地址不对，请检查 TAROT_API_BASE');
+    } finally {
+        srv.stop();
+        await new Promise(r => mock.server.close(r));
+    }
+});
+
+test('上游 429 转发 Retry-After 并给出限流文案', async () => {
+    const mock = await startMock(() => ({
+        status: 429,
+        headers: { 'Retry-After': '17' },
+        body: { error: 'rate limited' }
+    }));
+    const srv = await startServer({
+        TAROT_API_BASE: `http://127.0.0.1:${mock.port}/v1`,
+        TAROT_API_FORMAT: 'openai'
+    });
+    try {
+        const res = await postChat(srv.port);
+        assert.equal(res.status, 502);
+        assert.equal(res.json.message, '请求过于频繁，请稍后重试');
+        assert.equal(res.headers['retry-after'], '17');
+    } finally {
+        srv.stop();
+        await new Promise(r => mock.server.close(r));
+    }
+});
+
+test('上游 5xx 映射为模型服务不可用文案', async () => {
+    const mock = await startMock(() => ({ status: 503, body: { error: 'overloaded' } }));
+    const srv = await startServer({
+        TAROT_API_BASE: `http://127.0.0.1:${mock.port}/v1`,
+        TAROT_API_FORMAT: 'openai'
+    });
+    try {
+        const res = await postChat(srv.port);
+        assert.equal(res.json.message, '模型服务暂时不可用');
+    } finally {
+        srv.stop();
+        await new Promise(r => mock.server.close(r));
+    }
+});
+
+test('上游 200 但没有 usage 时不写账本行，requests 不增加', async () => {
+    const mock = await startMock(() => ({
+        body: { choices: [{ message: { role: 'assistant', content: '【解读】\n没有 usage 的响应。' } }] }
+    }));
+    const srv = await startServer({
+        TAROT_API_BASE: `http://127.0.0.1:${mock.port}/v1`,
+        TAROT_API_FORMAT: 'openai'
+    });
+    try {
+        const res = await postChat(srv.port);
+        assert.equal(res.status, 200);
+        assert.deepEqual(readUsage(srv.usageLog), [], '没有 token 字段时不应写空账本行');
+        const summary = await new Promise((resolve, reject) => {
+            http.get({ host: '127.0.0.1', port: srv.port, path: '/api/usage' }, response => {
+                const chunks = [];
+                response.on('data', chunk => chunks.push(chunk));
+                response.on('end', () => resolve(JSON.parse(Buffer.concat(chunks).toString('utf8'))));
+            }).on('error', reject);
+        });
+        assert.deepEqual(summary, {}, '/api/usage 的 requests 不应把无 usage 的请求算进去');
+    } finally {
+        srv.stop();
+        await new Promise(r => mock.server.close(r));
+    }
+});
+
+test('上游失败不写用量账本，避免把重试算成消耗', async () => {
+    const mock = await startMock(() => ({ status: 500, body: { error: 'boom' } }));
+    const srv = await startServer({
+        TAROT_API_BASE: `http://127.0.0.1:${mock.port}/v1`,
+        TAROT_API_FORMAT: 'openai'
+    });
+    try {
+        const res = await postChat(srv.port);
+        assert.equal(res.status, 502);
+        assert.deepEqual(readUsage(srv.usageLog), []);
     } finally {
         srv.stop();
         await new Promise(r => mock.server.close(r));

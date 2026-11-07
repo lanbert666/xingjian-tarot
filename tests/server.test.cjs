@@ -250,16 +250,13 @@ test('/api/chat 解析 usage 并逐条追加 JSONL', async () => {
     assert.equal(usage[today].total_tokens, 36);
 });
 
-test('/api/chat 缺失 usage 时记 null 且不中断响应', async () => {
+test('200 但无 usage 时不写账本行', async () => {
     clearUsageLog();
     upstreamResponse = { status: 200, body: { output: [] } };
     const res = await rawRequest('/api/chat', { method: 'POST', body: VALID_CHAT });
     assert.equal(res.status, 200, 'usage 缺失不得影响主流程');
     const lines = readUsageLines();
-    assert.equal(lines.length, 1);
-    assert.equal(lines[0].prompt_tokens, null);
-    assert.equal(lines[0].completion_tokens, null);
-    assert.equal(lines[0].total_tokens, null);
+    assert.equal(lines.length, 0, '没有 token 字段时不应写空账本行，requests 也不应增加');
 
     clearUsageLog();
     upstreamResponse = { status: 200, body: { usage: { prompt_tokens: 7 } } };

@@ -64,7 +64,8 @@
                         <input type="text" id="user-question" placeholder="如：我的感情走向、事业抉择、近期运势…" autocomplete="off" aria-describedby="question-counter">
                         <button id="btn-next-step" class="glow-button" type="button"><span>聆听命运</span><span class="btn-ripple"></span></button>
                     </div>
-                    <p id="question-counter" class="char-counter" aria-live="polite">0 / 200</p>
+                    <p id="question-counter" class="char-counter">0 / 200</p>
+                    <p id="question-counter-announce" class="sr-only" role="status"></p>
                 </div>
                 <p class="privacy-note">历史仅保存在此浏览器。AI 在线时，问题与牌面会发送至模型网关；请勿填写姓名、联系方式等隐私信息。</p>
                 <div class="quick-tags">
@@ -138,6 +139,7 @@
                 <div class="flip-tip">🔮 点击上方的卡牌，揭示神秘的命运图卷…</div>
                 <div class="reading-report-panel glass-panel hidden" id="reading-report" tabindex="-1" aria-label="本次占卜解读报告">
                     <div class="report-header"><span class="seal-icon">✦ 星见启示录 ✦</span><span id="report-source" class="report-source">本地解读</span><button id="btn-ai-retry" class="mystic-btn ai-retry hidden" type="button"><span class="icon">↻</span> 重试 AI 解读</button></div>
+                    <p id="report-truncated-notice" class="report-notice hidden" role="status">本次解读因长度上限被截断；可重新抽牌，或在追问中请星见补全。</p>
                     <div id="ai-progress" class="ai-progress hidden">
                         <span id="ai-progress-text" role="status" aria-live="polite">✦ 星见正在感应星轨…</span>
                         <button id="btn-ai-cancel" class="text-btn ai-cancel" type="button">取消生成</button>
@@ -160,7 +162,8 @@
                                 <textarea id="ai-chat-input" rows="2" placeholder="就这次占卜，继续向星见追问…" aria-label="就这次占卜继续追问" aria-describedby="ai-chat-counter"></textarea>
                                 <button id="ai-chat-send" class="glow-button" type="button"><span>发送</span></button>
                             </div>
-                            <p id="ai-chat-counter" class="char-counter" aria-live="polite">0 / 500</p>
+                            <p id="ai-chat-counter" class="char-counter">0 / 500</p>
+                            <p id="ai-chat-counter-announce" class="sr-only" role="status"></p>
                         </div>
                     </div>
                     <section class="reflection-card" id="reflection-card" aria-labelledby="reflection-title" tabindex="-1">
