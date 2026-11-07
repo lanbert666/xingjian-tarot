@@ -65,9 +65,6 @@ TAROT_MODEL=claude-sonnet-4-5
 | `TAROT_GATEWAY_CA` | 否 | 自签证书的根证书路径，默认 `gateway-ca.crt`（见下节） |
 | `PORT` | 否 | 本地监听端口，默认 `8901` |
 | `TAROT_USAGE_LOG` | 否 | AI 用量账本路径，默认项目根目录的 `usage-log.jsonl` |
-| `TAROT_ALLOWED_HOSTS` | 否 | 对外提供服务时放行的域名，逗号分隔（见下节「放到公网上」） |
-| `TAROT_TRUST_PROXY` | 否 | 设为 `1` 时从 `CF-Connecting-IP` / `X-Forwarded-For` 取访客地址用于限流；直连时不要开 |
-| `TAROT_DAILY_LIMIT` | 否 | 每日 AI 调用总量上限，默认 `200`；`0` 表示不限制 |
 
 表中变量与 [`.env.example`](.env.example) 一一对应；三项必填缺任意一项时，服务器照常启动并打印缺少哪几项，`/api/chat` 返回 503、
 `/api/config` 报 `{"ai":false}`，页面自动回退本地解读引擎，不会打断抽牌流程。
@@ -108,36 +105,6 @@ TAROT_GATEWAY_CA=D:\certs\my-ca.pem
 
 如果 `TAROT_GATEWAY_URL` 被设成 `http://...`，Bearer 会明文发送；这只允许本机 mock，
 生产必须用 `https://`，服务器启动会打印警告。
-
-### 放到公网上（可选）
-
-默认只接受本机 Host 访问，`/api/config`、`/api/chat`、`/api/usage` 都只响应
-`127.0.0.1` / `localhost`，用来挡住 DNS rebinding。要让别人从公网访问带 AI 的版本，
-需要用隧道或反向代理把公网域名转发到本机，并显式放行该域名：
-
-```bash
-# 示例：Cloudflare Tunnel（内网机器只要能出网即可，不需要公网 IP）
-cloudflared tunnel --url http://127.0.0.1:8901
-# 输出类似 https://random-words.trycloudflare.com
-```
-
-```dotenv
-# .env
-TAROT_ALLOWED_HOSTS=random-words.trycloudflare.com
-TAROT_TRUST_PROXY=1
-TAROT_DAILY_LIMIT=200
-```
-
-- `TAROT_ALLOWED_HOSTS` 只放行 `/api/config` 与 `/api/chat`；`/api/usage`（本机用量账本）
-  永远只响应本机，公网访客读不到。
-- `TAROT_TRUST_PROXY=1` 让限流按真实访客地址计数，而不是全站共用一个桶。
-  **只有确实在隧道/反代后面时才开**，直连时开启会让客户端伪造该头绕过限流。
-- `TAROT_DAILY_LIMIT` 是每日总量上限，默认 200，用来保护模型配额不被陌生人刷空。
-- 页面本身也由 `server.js` 托管，所以公网地址打开就是完整应用（同源，无需 CORS）。
-- 把内网机器暴露到公网前，先确认所在网络/公司的安全规定是否允许。
-
-只想公开静态版本（不含 AI）时，用 GitHub Pages 就够了：仓库 Settings → Pages 选 `main` 分支根目录，
-前端探测不到 `/api/config` 会自动回退本地解读引擎。
 
 ### 收紧 `.env` 与项目目录权限（共享电脑必做）
 

@@ -58,20 +58,6 @@ const API_FORMATS = new Set(['responses', 'openai', 'anthropic']);
 // 只认 max_tokens。默认用兼容面更广的 max_tokens，需要时用环境变量改名。
 const MAX_TOKENS_PARAM = String(process.env.TAROT_MAX_TOKENS_PARAM || '').trim() || 'max_tokens';
 
-// 公网部署（Cloudflare Tunnel / ngrok / frp / 反向代理）：
-// 默认只接受本机 Host，挡住 DNS rebinding。要对外提供服务时，把隧道域名写进
-// TAROT_ALLOWED_HOSTS（逗号分隔，带端口则连端口一起写），其余校验不变。
-const ALLOWED_HOSTS = String(process.env.TAROT_ALLOWED_HOSTS || '')
-    .split(',')
-    .map(item => item.trim().toLowerCase())
-    .filter(Boolean);
-// 隧道后面所有请求的 socket 远端地址都是 127.0.0.1，限流会退化成「全站共用一个桶」。
-// 只有显式声明 TAROT_TRUST_PROXY=1 时才从 CF-Connecting-IP / X-Forwarded-For 取访客地址；
-// 直连场景保持默认，避免客户端伪造该头绕过限流。
-const TRUST_PROXY = String(process.env.TAROT_TRUST_PROXY || '').trim() === '1';
-// 公网部署时按天限制总调用次数，保护模型配额被陌生人刷爆；0 表示不限制。
-const DAILY_LIMIT = Math.max(0, Math.floor(Number(process.env.TAROT_DAILY_LIMIT ?? 200)) || 0);
-
 // 本地用量账本：每条上游响应追加一行 JSONL，作为核对服务商账单的证据。
 // 测试可用 TAROT_USAGE_LOG 指向临时文件，避免污染项目目录。
 const USAGE_LOG = process.env.TAROT_USAGE_LOG || path.join(__dirname, 'usage-log.jsonl');
@@ -339,27 +325,10 @@ function rateLimit(key) {
     return true;
 }
 
-// 限流键：直连用 socket 远端地址；隧道后面所有请求都来自 127.0.0.1，
-// 只有 TAROT_TRUST_PROXY=1 时才改用反代透传的访客地址，否则全站共用一个桶。
-// 不信任 x-session-id 之类的客户端头——轮换它就能绕过限流。
+// 限流键只使用 socket 远端地址，不信任任何客户端头。x-session-id 由客户端控制，
+// 轮换它就能绕过限流；本机页面共享 127.0.0.1，因此共享 30/min 额度。
 function rateLimitKey(req) {
-    if (TRUST_PROXY) {
-        const forwarded = String(req.headers['cf-connecting-ip'] || '').trim()
-            || String(req.headers['x-forwarded-for'] || '').split(',')[0].trim();
-        if (forwarded) return `${forwarded}|tarot-public`;
-    }
     return `${req.socket.remoteAddress || 'unknown'}|tarot-local`;
-}
-
-// 每日总调用上限：按本地日期计数，跨天自动重置。
-const dailyBuckets = new Map();
-function dailyLimitExceeded() {
-    if (!DAILY_LIMIT) return false;
-    const day = new Date().toISOString().slice(0, 10);
-    const used = dailyBuckets.get(day) || 0;
-    if (used >= DAILY_LIMIT) return true;
-    dailyBuckets.set(day, used + 1);
-    return false;
 }
 setInterval(() => {
     const now = Date.now();
@@ -376,26 +345,11 @@ function isLocalOrigin(origin) {
     return isLocalHost(url.host);
 }
 
-// 同源校验：本机页面，或 TAROT_ALLOWED_HOSTS 里显式放行的公网域名。
-function isAllowedOrigin(origin) {
-    if (isLocalOrigin(origin)) return true;
-    let url;
-    try { url = new URL(origin); } catch { return false; }
-    if (url.protocol !== 'https:' && url.protocol !== 'http:') return false;
-    return ALLOWED_HOSTS.includes(url.host.toLowerCase());
-}
-
 // Host 校验：/api/usage 会暴露本机用量，只响应从本机地址访问的请求，
 // 防止通过 DNS rebinding 或局域网别名读取账本。
 function isLocalHost(host) {
     return [`127.0.0.1:${activePort}`, `localhost:${activePort}`, `[::1]:${activePort}`]
         .includes(String(host || '').toLowerCase());
-}
-
-// 公网部署时 /api/chat 与 /api/config 需要对隧道域名开放，其余校验照旧。
-function isAllowedHost(host) {
-    const value = String(host || '').toLowerCase();
-    return isLocalHost(value) || ALLOWED_HOSTS.includes(value);
 }
 
 // 单个 token 字段的防御式解析：缺失、空串或非数字一律记 null。
@@ -640,13 +594,12 @@ async function handleChat(req, res) {
     if (!PROVIDER) return sendJson(res, 503, { error: 'AI 未配置：请设置 TAROT_API_BASE（或 TAROT_GATEWAY_HOST）后重启服务器' });
     if (!MODEL) return sendJson(res, 503, { error: 'AI 未配置：请设置 TAROT_MODEL 后重启服务器' });
 
-    // Host 校验：默认只接受本机地址，挡住 DNS rebinding 把攻击者域名解析到 127.0.0.1；
-    // 公网部署时 TAROT_ALLOWED_HOSTS 里的隧道域名同样放行。
-    if (!isAllowedHost(req.headers.host)) return sendJson(res, 403, { error: 'forbidden host' });
+    // Host 校验：只接受本机地址，挡住 DNS rebinding 把攻击者域名解析到 127.0.0.1。
+    if (!isLocalHost(req.headers.host)) return sendJson(res, 403, { error: 'forbidden host' });
 
     // Origin 校验：只允许本服务同源页面调用，挡住其他网站借浏览器蹭配额。
     const origin = req.headers.origin;
-    if (origin && !isAllowedOrigin(origin)) return sendJson(res, 403, { error: 'forbidden origin' });
+    if (origin && !isLocalOrigin(origin)) return sendJson(res, 403, { error: 'forbidden origin' });
 
     // 浏览器跨站/同站请求直接拒绝；非浏览器客户端没有该头，仍由 Host/Origin 约束。
     const fetchSite = String(req.headers['sec-fetch-site'] || '').toLowerCase();
@@ -663,11 +616,6 @@ async function handleChat(req, res) {
     if (!rateLimit(rateLimitKey(req))) {
         res.setHeader('Retry-After', '60');
         return sendJson(res, 429, { error: '请求过于频繁，请稍后再试' });
-    }
-
-    // 公网部署的每日总量保护：超过上限直接拒绝，避免陌生人把模型配额刷空。
-    if (dailyLimitExceeded()) {
-        return sendJson(res, 429, { error: '今日 AI 解读次数已达上限，请明天再来' });
     }
 
     let payload;
@@ -816,10 +764,10 @@ async function handleRequest(req, res) {
     const url = String(req.url || '').split('?')[0];
 
     // AI 配置探活：页面据此判断 AI 是否在线（不下发密钥，只告知是否已配置）。
-    // 默认只允许本机 Host，避免 DNS rebinding 页面读取配置；公网部署时放行隧道域名。
+    // 与 /api/usage 一样只允许本机 Host，避免 DNS rebinding 页面读取配置。
     if (url === '/api/config') {
         if (req.method !== 'GET' && req.method !== 'HEAD') return sendMethodNotAllowed(res, 'GET, HEAD');
-        if (!isAllowedHost(req.headers.host)) return sendJson(res, 403, { error: 'forbidden host' });
+        if (!isLocalHost(req.headers.host)) return sendJson(res, 403, { error: 'forbidden host' });
         // 只告知是否已配置，不下发模型名：前端不需要，也不该让页面暴露后端选型。
         return sendJson(res, 200, { ai: Boolean(API_KEY && MODEL && PROVIDER) });
     }
