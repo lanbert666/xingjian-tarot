@@ -1232,10 +1232,12 @@ test('档案容错：根 JSON 损坏时提示已忽略且不崩溃', { timeout: 
 
 test('本地存储失败：明确提示且不阻断报告与行动输入', { timeout: 40000 }, async t => {
     const page = await newPage(t, {
-        extraInit: `Storage.prototype.setItem = function () { throw new DOMException('QuotaExceededError'); };`
+        // DOMException 的第二个参数才是 name；只传 message 会被归为 other，测不到配额分支。
+        extraInit: `Storage.prototype.setItem = function () { throw new DOMException('quota', 'QuotaExceededError'); };`
     });
     await finishSingleReading(page, 'E2E 存储失败');
-    await page.waitForText('#toast', '浏览器存储不可用', 10000);
+    // QuotaExceededError 归为「配额不足」，提示要能区分空间满和存储被禁用。
+    await page.waitForText('#toast', '存储空间已满', 10000);
     assert.equal(await page.eval(`localStorage.getItem('xingjian_history')`), null);
     assert.equal(await page.eval(`!document.getElementById('reading-report').classList.contains('hidden')`), true);
     await page.fill('#action-input', 'E2E 存储失败时仍可输入行动');

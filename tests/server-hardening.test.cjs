@@ -433,3 +433,128 @@ test('/api/usage 兼容旧账本行：null 分项不报错，缺 total 时按分
         server.stop();
     }
 });
+
+// 带自定义 Host / Origin 的请求：模拟隧道/反代把公网域名转发到本机。
+function requestWithHeaders(port, { method = 'GET', path = '/', headers = {}, body = null } = {}) {
+    return new Promise((resolve, reject) => {
+        const req = http.request({
+            host: '127.0.0.1',
+            port,
+            path,
+            method,
+            headers: { ...headers, ...(body ? { 'Content-Type': 'application/json' } : {}) }
+        }, res => {
+            const chunks = [];
+            res.on('data', c => chunks.push(c));
+            res.on('end', () => resolve({ status: res.statusCode, body: Buffer.concat(chunks).toString('utf8') }));
+        });
+        req.on('error', reject);
+        if (body) req.write(body);
+        req.end();
+    });
+}
+
+test('公网部署：TAROT_ALLOWED_HOSTS 放行的隧道域名可调用 /api/config 与 /api/chat', async () => {
+    const upstream = await startJsonMock({ output: [], usage: { input_tokens: 1, output_tokens: 2, total_tokens: 3 } });
+    const server = await startServer({
+        TAROT_API_KEY: 'sk-test-fake',
+        TAROT_GATEWAY_URL: `http://127.0.0.1:${upstream.address().port}/v1/responses`,
+        TAROT_ALLOWED_HOSTS: 'tarot.example.com, abc.trycloudflare.com'
+    });
+    const host = 'tarot.example.com';
+    try {
+        const config = await requestWithHeaders(server.port, { path: '/api/config', headers: { Host: host } });
+        assert.equal(config.status, 200, `放行域名应能读配置，实际 ${config.status}`);
+        assert.deepEqual(JSON.parse(config.body), { ai: true });
+
+        const chat = await requestWithHeaders(server.port, {
+            method: 'POST',
+            path: '/api/chat',
+            headers: { Host: host, Origin: `https://${host}`, 'Sec-Fetch-Site': 'same-origin' },
+            body: VALID_CHAT
+        });
+        assert.equal(chat.status, 200, `放行域名应能对话，实际 ${chat.status}: ${chat.body}`);
+
+        const other = await requestWithHeaders(server.port, { path: '/api/config', headers: { Host: 'evil.example.com' } });
+        assert.equal(other.status, 403, '未放行的域名仍应 403');
+
+        const badOrigin = await requestWithHeaders(server.port, {
+            method: 'POST',
+            path: '/api/chat',
+            headers: { Host: host, Origin: 'https://evil.example.com', 'Sec-Fetch-Site': 'same-origin' },
+            body: VALID_CHAT
+        });
+        assert.equal(badOrigin.status, 403, '放行域名的页面也不该被其他站点跨站调用');
+    } finally {
+        server.stop();
+        upstream.close();
+    }
+});
+
+test('公网部署：/api/usage 即使域名被放行也仍只响应本机', async () => {
+    const server = await startServer({ TAROT_ALLOWED_HOSTS: 'tarot.example.com' });
+    try {
+        const remote = await requestWithHeaders(server.port, { path: '/api/usage', headers: { Host: 'tarot.example.com' } });
+        assert.equal(remote.status, 403, '用量账本属于部署方私有信息，不对公网开放');
+    } finally {
+        server.stop();
+    }
+});
+
+test('公网部署：TAROT_TRUST_PROXY=1 时按 CF-Connecting-IP 分别限流', async () => {
+    const upstream = await startJsonMock({ output: [], usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 } });
+    const server = await startServer({
+        TAROT_API_KEY: 'sk-test-fake',
+        TAROT_GATEWAY_URL: `http://127.0.0.1:${upstream.address().port}/v1/responses`,
+        TAROT_ALLOWED_HOSTS: 'tarot.example.com',
+        TAROT_TRUST_PROXY: '1'
+    });
+    const host = 'tarot.example.com';
+    try {
+        const call = ip => requestWithHeaders(server.port, {
+            method: 'POST',
+            path: '/api/chat',
+            headers: { Host: host, Origin: `https://${host}`, 'Sec-Fetch-Site': 'same-origin', 'CF-Connecting-IP': ip },
+            body: VALID_CHAT
+        });
+        for (let i = 0; i < 30; i += 1) {
+            const res = await call('203.0.113.7');
+            assert.equal(res.status, 200, `第 ${i + 1} 次应放行，实际 ${res.status}`);
+        }
+        const blocked = await call('203.0.113.7');
+        assert.equal(blocked.status, 429, '同一访客超过 30 次/分钟应被限流');
+
+        const otherVisitor = await call('198.51.100.9');
+        assert.equal(otherVisitor.status, 200, '换一个访客不应受上一个访客的限流影响');
+    } finally {
+        server.stop();
+        upstream.close();
+    }
+});
+
+test('公网部署：TAROT_DAILY_LIMIT 达到当日上限后返回 429', async () => {
+    const upstream = await startJsonMock({ output: [], usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 } });
+    const server = await startServer({
+        TAROT_API_KEY: 'sk-test-fake',
+        TAROT_GATEWAY_URL: `http://127.0.0.1:${upstream.address().port}/v1/responses`,
+        TAROT_ALLOWED_HOSTS: 'tarot.example.com',
+        TAROT_DAILY_LIMIT: '2'
+    });
+    const host = 'tarot.example.com';
+    try {
+        const call = () => requestWithHeaders(server.port, {
+            method: 'POST',
+            path: '/api/chat',
+            headers: { Host: host, Origin: `https://${host}`, 'Sec-Fetch-Site': 'same-origin' },
+            body: VALID_CHAT
+        });
+        assert.equal((await call()).status, 200, '第 1 次应放行');
+        assert.equal((await call()).status, 200, '第 2 次应放行');
+        const third = await call();
+        assert.equal(third.status, 429, '超过当日上限应拒绝');
+        assert.match(third.body, /今日/, '应给出可读的中文提示');
+    } finally {
+        server.stop();
+        upstream.close();
+    }
+});
