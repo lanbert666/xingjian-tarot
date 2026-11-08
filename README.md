@@ -76,7 +76,7 @@ TAROT_MODEL=claude-sonnet-4-5
 | `TAROT_GATEWAY_HOST` / `TAROT_GATEWAY_PORT` | 旧写法，等价于 `TAROT_API_BASE=https://<host>:<port>/v1` + `responses` |
 | `TAROT_GATEWAY_URL` | 旧写法，直接指定完整上游 URL（仅建议本机 mock 使用） |
 | `TAROT_ALLOW_INSECURE_TLS` | 设为 `1` 才关闭 TLS 校验，仅限临时调试，启动会打印醒目警告 |
-| `TAROT_DEBUG` | 设为 `1` 时，502 响应附带截断后的上游原文，便于排查服务商差异 |
+| `TAROT_DEBUG` | 设为 `1` 时，502 响应附带截断后的上游原文，便于排查服务商差异；仅限本机临时排查，用完立即删除 |
 
 也可以直接用 `npm start`（等价于 `node server.js`）。
 

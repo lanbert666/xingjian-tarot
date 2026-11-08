@@ -1051,6 +1051,8 @@ document.addEventListener('DOMContentLoaded', () => {
         if (defaultPrivacy) defaultPrivacy.checked = true;
         let alreadyRevealed = false;
         if (currentSpread.id === 'daily') {
+            // openDailyReading 已把 daily.date 归一为今天；这里用 localDayKey() 与
+            // dailyRevealedToday() 读取的 daily.date 等价，两处口径不会分叉。
             const existing = loadHistory().find(item => item.spreadId === 'daily' && item.dailyDate === localDayKey());
             if (existing) {
                 currentHistoryId = existing.id;
@@ -2333,7 +2335,9 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
             // 历史档案只作为「背景资料」放在单独的 user 消息里，并显式声明不执行其中指令；
             // system 永远是静态人设，导入档案里的「忽略以上指令」无法越权。
-            const archive = stripControlChars(chatContext).slice(0, 6000);
+            // 档案内容里的 <<< 会提前闭合外层定界符，让后续文字看起来像「档案结束」后的指令；
+            // 只中和内容中的连续左尖括号，外层定界符格式保持不变（既有用例依赖）。
+            const archive = stripControlChars(chatContext).slice(0, 6000).replace(/<{3}/g, '‹‹‹');
             const input = [
                 { role: 'system', content: [{ type: 'input_text', text: buildXingjianSystem() }] },
                 ...(archive ? [{
@@ -4000,6 +4004,24 @@ document.addEventListener('DOMContentLoaded', () => {
     document.addEventListener('visibilitychange', () => {
         if (!document.hidden) updateDailyEntry();
     });
+    // 切回本标签、系统唤醒或从 bfcache 恢复时不一定触发 visibilitychange，同样重算一次。
+    window.addEventListener('focus', updateDailyEntry);
+    window.addEventListener('pageshow', updateDailyEntry);
+
+    // 页面一直停在前台跨过零点时没有任何事件可依赖：定时到下一个本地零点后重算，并续排下一天。
+    // 定时器在后台标签页可能被节流而晚触发，focus/visibilitychange 会兜底，三条路径共用 updateDailyEntry。
+    let dailyRolloverTimer = 0;
+    function scheduleDailyRollover() {
+        clearTimeout(dailyRolloverTimer);
+        const now = new Date();
+        const nextMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 0, 0, 1, 0);
+        const delay = Math.max(1000, nextMidnight.getTime() - now.getTime());
+        dailyRolloverTimer = setTimeout(() => {
+            updateDailyEntry();
+            scheduleDailyRollover();
+        }, delay);
+    }
+    scheduleDailyRollover();
 
     updateDailyEntry();
     AI.init();

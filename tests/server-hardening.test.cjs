@@ -202,9 +202,9 @@ async function recordUsageRows(body) {
     }
 }
 
-function getJson(port, pathname) {
+function getJson(port, pathname, headers = {}) {
     return new Promise((resolve, reject) => {
-        const req = http.request({ host: '127.0.0.1', port, path: pathname, method: 'GET' }, res => {
+        const req = http.request({ host: '127.0.0.1', port, path: pathname, method: 'GET', headers }, res => {
             const chunks = [];
             res.on('data', c => chunks.push(c));
             res.on('end', () => resolve({ status: res.statusCode, body: Buffer.concat(chunks).toString('utf8') }));
@@ -429,6 +429,31 @@ test('/api/usage 兼容旧账本行：null 分项不报错，缺 total 时按分
         assert.equal(res.status, 200, '旧账本行不得让聚合报错');
         const days = JSON.parse(res.body);
         assert.deepEqual(days['2026-10-29'], { requests: 4, total_tokens: 27 });
+    } finally {
+        server.stop();
+    }
+});
+
+// R5-S03：静态文件同样只服务本机页面，伪造 Host 的 DNS rebinding 请求不能拿到前端源码。
+test('静态文件：伪造 Host 返回 403，本机 Host 正常，/api/config 行为不变', async () => {
+    const server = await startServer({ TAROT_API_KEY: '' });
+    try {
+        const evilStatic = await getJson(server.port, '/index.html', { Host: 'evil.example' });
+        assert.equal(evilStatic.status, 403, '伪造 Host 的静态请求应 403');
+        assert.equal(JSON.parse(evilStatic.body).error, 'forbidden host');
+
+        const evilApp = await getJson(server.port, '/app.js', { Host: `localhost:${server.port + 1}` });
+        assert.equal(evilApp.status, 403, '端口不匹配的 localhost 也不应放行');
+
+        const okStatic = await getJson(server.port, '/index.html');
+        assert.equal(okStatic.status, 200, '本机 Host 的静态请求应正常');
+        assert.match(okStatic.body, /<!DOCTYPE html>/i);
+
+        const evilApi = await getJson(server.port, '/api/config', { Host: 'evil.example' });
+        assert.equal(evilApi.status, 403, '/api/config 的 Host 校验保持不变');
+        const okApi = await getJson(server.port, '/api/config');
+        assert.equal(okApi.status, 200);
+        assert.equal(typeof JSON.parse(okApi.body).ai, 'boolean');
     } finally {
         server.stop();
     }

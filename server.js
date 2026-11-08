@@ -784,6 +784,8 @@ async function handleRequest(req, res) {
 
     // 静态文件：HEAD 与 GET 等价（只返回头，不返回响应体）
     if (req.method !== 'GET' && req.method !== 'HEAD') return sendMethodNotAllowed(res, 'GET, HEAD');
+    // 与 /api/* 一致：只服务本机页面。否则 DNS rebinding 页面可以借伪造 Host 读取前端源码。
+    if (!isLocalHost(req.headers.host)) return sendJson(res, 403, { error: 'forbidden host' });
     if (!isStaticAllowed(url)) {
         return sendJson(res, 404, { error: '未找到请求的资源' });
     }
