@@ -80,8 +80,11 @@ const GATEWAY = (() => {
     }
 })();
 
-// 解析项目根目录的 .env（KEY=VALUE，一行一条，# 开头为注释），不覆盖已有环境变量
+// 解析项目根目录的 .env（KEY=VALUE，一行一条，# 开头为注释），不覆盖已有环境变量。
+// TAROT_NO_ENV=1 时整体跳过：测试进程用它隔离开发机上的真实 .env，
+// 否则 .env 里的 TAROT_API_BASE 会盖过用例自己设置的 TAROT_GATEWAY_URL。
 function loadDotEnv(file) {
+    if (process.env.TAROT_NO_ENV === '1') return;
     let text;
     try { text = fs.readFileSync(file, 'utf8'); } catch { return; }
     for (const line of text.split(/\r?\n/)) {

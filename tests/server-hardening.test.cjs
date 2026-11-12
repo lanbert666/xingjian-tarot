@@ -41,7 +41,8 @@ function startServer(env) {
     return new Promise((resolve, reject) => {
         const child = spawn(process.execPath, [SERVER], {
             // TAROT_MODEL：模型名已改为环境变量，测试统一用占位值，避免依赖本机 .env
-            env: { ...process.env, PORT: '0', TAROT_USAGE_LOG: usageLog, TAROT_MODEL: 'test-model', ...env },
+            // TAROT_NO_ENV：完全不读 .env，保证用例与开发机配置无关
+            env: { ...process.env, PORT: '0', TAROT_NO_ENV: '1', TAROT_USAGE_LOG: usageLog, TAROT_MODEL: 'test-model', ...env },
             stdio: ['ignore', 'pipe', 'pipe']
         });
         let stdout = '';

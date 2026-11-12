@@ -47,6 +47,7 @@ async function startServer(env) {
         env: {
             ...process.env,
             PORT: '0',
+            TAROT_NO_ENV: '1', // 不读开发机上的 .env
             TAROT_API_KEY: 'sk-test-fake',
             TAROT_MODEL: 'test-model',
             TAROT_USAGE_LOG: usageLog,

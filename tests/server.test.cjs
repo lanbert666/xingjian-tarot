@@ -73,6 +73,7 @@ test.before(async () => {
         env: {
             ...process.env,
             PORT: '0',
+            TAROT_NO_ENV: '1', // 不读开发机上的 .env，避免真实网关配置盖过下面的 mock 地址
             TAROT_API_KEY: 'sk-test-fake', // 假 key：只为绕过 503 前置检查，不会真实请求网关
             TAROT_MODEL: 'test-model', // 模型名已改为环境变量，测试用占位值
             TAROT_GATEWAY_URL: `http://127.0.0.1:${mockPort}/v1/responses`,
